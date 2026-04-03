@@ -7,7 +7,7 @@
  * 4. 异步接收 Worker 回复（支持多次 reply），通过 AlemonJS Format 发送
  * 5. 接收 Worker API 请求，调用 AlemonJS 平台 API 实现双向通信
  */
-import { EventsEnum, Format, logger, Next, sendToChannel, sendToUser, useGuild, useMe, useMember, useMessage, useRequest, useUser } from 'alemonjs';
+import { EventsEnum, Format, logger, Next, sendToChannel, sendToUser, useClient, useGuild, useMe, useMember, useMessage, useRequest, useUser } from 'alemonjs';
 import { manager } from './manager';
 import type { IPCApiRequest, IPCDone, IPCMedia, IPCReply, ReplyContent } from './protocol';
 
@@ -15,20 +15,20 @@ import type { IPCApiRequest, IPCDone, IPCMedia, IPCReply, ReplyContent } from '.
  * 尝试获取 OneBot 平台的原生 API 客户端
  * 仅在 @alemonjs/onebot 已安装且当前事件来自 OneBot 平台时可用
  */
-let _useClientFn: any = null;
+let _oneBotAPI: any = null;
 
 async function loadOneBotClient(): Promise<void> {
-  if (_useClientFn !== null) {
+  if (_oneBotAPI !== null) {
     return;
   }
 
   try {
-    const mod = await import('@alemonjs/onebot');
+    const { API } = await import('@alemonjs/onebot');
 
-    _useClientFn = mod.useClient;
-    logger.info('[bridge] @alemonjs/onebot useClient 已加载');
+    _oneBotAPI = API;
+    logger.info('[bridge] @alemonjs/onebot API 已加载');
   } catch {
-    _useClientFn = false; // 标记为不可用，避免重复尝试
+    _oneBotAPI = false; // 标记为不可用，避免重复尝试
     logger.debug('[bridge] @alemonjs/onebot 不可用，OneBot 特有 API 将降级处理');
   }
 }
@@ -38,12 +38,12 @@ async function loadOneBotClient(): Promise<void> {
  * 仅 OneBot 平台可用，其他平台返回 null
  */
 function getOneBotClient(event: EventsEnum): any {
-  if (!_useClientFn || _useClientFn === false) {
+  if (!_oneBotAPI || _oneBotAPI === false) {
     return null;
   }
 
   try {
-    const [client] = _useClientFn(event);
+    const [client] = useClient(event, _oneBotAPI);
 
     return client;
   } catch {
@@ -893,6 +893,9 @@ export default (e: EventsEnum, next: Next) => {
   });
 
   // 转发给 Worker — 提取所有 AlemonJS 标准字段
+  const _atUsers = extractAtUsers(e);
+  const _rawEvent = extractRawEvent(e, e);
+
   manager.send({
     type: 'event',
     id,
@@ -909,8 +912,8 @@ export default (e: EventsEnum, next: Next) => {
       spaceId: e.GuildId ?? e.ChannelId ?? '',
       isPrivate: !e.GuildId,
       isMaster: e.IsMaster ?? false,
-      atUsers: extractAtUsers(e),
-      rawEvent: extractRawEvent(e, e)
+      atUsers: _atUsers,
+      rawEvent: _rawEvent
     }
   });
 };

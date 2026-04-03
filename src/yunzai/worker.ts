@@ -26,7 +26,8 @@ function log(level: string, ...args: string[]): void {
 // ━━━━━━━━━━━━━━━ API 调用基础设施 ━━━━━━━━━━━━━━━
 
 /** 等待父进程 API 响应的 Promise map */
-const apiPending = new Map<string, { resolve:(v: any) => void; reject: (e: Error) => void }>();
+// eslint-disable-next-line func-call-spacing
+const apiPending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void }>();
 let apiIdCounter = 0;
 
 /** 当前正在处理的事件平台（用于 API 调用路由） */
@@ -41,7 +42,8 @@ let defaultPlatform = '';
 // ━━━━━━━━━━━━━━━ Reply 结果追踪 ━━━━━━━━━━━━━━━
 
 /** 等待父进程 reply 发送结果的 Promise map */
-const replyPending = new Map<string, { resolve:(v: any) => void }>();
+// eslint-disable-next-line func-call-spacing
+const replyPending = new Map<string, { resolve: (v: any) => void }>();
 let replyIdCounter = 0;
 
 /** 处理父进程返回的 reply 结果 */
@@ -348,7 +350,111 @@ function injectGlobals(): void {
      * ZZZ-Plugin / miao-plugin 使用 Bot.makeForwardMsg(msgs)
      * 展平节点为普通消息段数组
      */
-    makeForwardMsg: (msgs: any[]) => buildForwardMsgParts(msgs)
+    makeForwardMsg: (msgs: any[]) => buildForwardMsgParts(msgs),
+
+    // ── EventEmitter 兼容（yenai-plugin 等插件在加载时调用 Bot.on） ──
+    // eslint-disable-next-line func-call-spacing
+    _events: new Map<string, ((...args: any[]) => void)[]>(),
+    on(event: string, fn: (...args: any[]) => void) {
+      const list = botInstance._events.get(event) ?? [];
+
+      list.push(fn);
+      botInstance._events.set(event, list);
+
+      return botInstance;
+    },
+    addListener(event: string, fn: (...args: any[]) => void) {
+      return botInstance.on(event, fn);
+    },
+    prependListener(event: string, fn: (...args: any[]) => void) {
+      const list = botInstance._events.get(event) ?? [];
+
+      list.unshift(fn);
+      botInstance._events.set(event, list);
+
+      return botInstance;
+    },
+    once(event: string, fn: (...args: any[]) => void) {
+      const wrapper = (...args: any[]) => {
+        botInstance.off(event, wrapper);
+        fn(...args);
+      };
+
+      return botInstance.on(event, wrapper);
+    },
+    prependOnceListener(event: string, fn: (...args: any[]) => void) {
+      const wrapper = (...args: any[]) => {
+        botInstance.off(event, wrapper);
+        fn(...args);
+      };
+
+      return botInstance.prependListener(event, wrapper);
+    },
+    off(event: string, fn: (...args: any[]) => void) {
+      const list = botInstance._events.get(event);
+
+      if (list) {
+        botInstance._events.set(
+          event,
+          list.filter((f: any) => f !== fn)
+        );
+      }
+
+      return botInstance;
+    },
+    removeListener(event: string, fn: (...args: any[]) => void) {
+      return botInstance.off(event, fn);
+    },
+    emit(event: string, ...args: any[]) {
+      const list = botInstance._events.get(event);
+
+      if (list) {
+        for (const fn of [...list]) {
+          try {
+            fn(...args);
+          } catch {
+            /* 静默 */
+          }
+        }
+      }
+
+      return !!list?.length;
+    },
+    removeAllListeners(event?: string) {
+      if (event) {
+        botInstance._events.delete(event);
+      } else {
+        botInstance._events.clear();
+      }
+
+      return botInstance;
+    },
+    listenerCount(event: string) {
+      return botInstance._events.get(event)?.length ?? 0;
+    },
+    listeners(event: string) {
+      return [...(botInstance._events.get(event) ?? [])];
+    },
+    rawListeners(event: string) {
+      return [...(botInstance._events.get(event) ?? [])];
+    },
+    eventNames() {
+      return [...botInstance._events.keys()];
+    },
+    setMaxListeners(_n: number) {
+      return botInstance;
+    },
+    getMaxListeners() {
+      return Infinity;
+    },
+
+    // ── 配置/状态兼容字段（部分插件访问 Bot.config / Bot.status） ──
+    config: {
+      platform: 1,
+      log_level: 'info',
+      data_dir: path.join(process.cwd(), 'data')
+    },
+    status: 11 // ONLINE
   };
 
   g.Bot = new Proxy(botInstance, {
@@ -365,7 +471,7 @@ function injectGlobals(): void {
   // ── segment (icqq 消息段构造) ──
   g.segment = {
     image: (file: any) => ({ type: 'image', file }),
-    at: (qq: number, text?: string) => ({ type: 'at', qq, text: text ?? '' }),
+    at: (qq: string | number, text?: string) => ({ type: 'at', qq, text: text ?? '' }),
     face: (id: number) => ({ type: 'face', id }),
     text: (text: string) => ({ type: 'text', text }),
     record: (file: any) => ({ type: 'record', file }),
@@ -402,7 +508,14 @@ function injectGlobals(): void {
     bface: (file: string, text?: string) => ({ type: 'bface', file, text: text ?? '' }),
     sface: (id: number, text?: string) => ({ type: 'sface', id, text: text ?? '' }),
     /** Yunzai polyfill — 按钮消息（多数平台不支持，返回空字符串） */
-    button: () => ''
+    button: () => '',
+    /** 转发消息节点（构建合并转发消息时使用） */
+    // eslint-disable-next-line camelcase
+    node: (user_id: any, nickname: string, content: any) => ({
+      type: 'node',
+      // eslint-disable-next-line camelcase
+      data: { user_id, nickname, content }
+    })
   };
 }
 
@@ -490,7 +603,7 @@ async function serializeReply(msg: any): Promise<ReplyContent[]> {
         return [{ type: 'image', data: file }];
       }
       case 'at':
-        return [{ type: 'at', data: String(msg.qq) }];
+        return [{ type: 'at', data: String(msg.qq ?? msg.data?.qq ?? '') }];
       case 'face':
         return [{ type: 'face', data: String(msg.id) }];
       case 'text':
@@ -540,6 +653,63 @@ function detectAtMe(message: any[], selfId: number): boolean {
 /** 检测消息段中是否 at all */
 function detectAtAll(message: any[]): boolean {
   return message.some((s: any) => s.type === 'at' && (s.data?.qq === 'all' || s.qq === 'all'));
+}
+
+/**
+ * 提取消息段中第一个非自身、非 all 的 at 目标 QQ
+ * 用于在 buildEvent 中预填 e.at，作为 dealMsg 的安全兜底
+ */
+function extractFirstAtTarget(message: any[], selfId: number): string | number | undefined {
+  for (const s of message) {
+    if (s.type !== 'at') {
+      continue;
+    }
+    const qq = s.data?.qq ?? s.qq;
+
+    if (qq === null || qq === undefined || qq === 'all' || String(qq) === String(selfId)) {
+      continue;
+    }
+
+    return qq;
+  }
+
+  return undefined;
+}
+
+/**
+ * 解析 CQ 码字符串为消息段数组
+ * 例: "[CQ:at,qq=12345] hello" → [{type:'at',qq:'12345'},{type:'text',text:' hello'}]
+ */
+function parseCQMessage(str: string): any[] {
+  const segs: any[] = [];
+  const re = /\[CQ:([^,\]]+)((?:,[^,\]]+)*)\]/g;
+  let lastIdx = 0;
+  let m: RegExpExecArray | null;
+
+  while ((m = re.exec(str)) !== null) {
+    if (m.index > lastIdx) {
+      segs.push({ type: 'text', text: str.slice(lastIdx, m.index) });
+    }
+    const type = m[1];
+    const params: Record<string, string> = {};
+
+    if (m[2]) {
+      for (const kv of m[2].slice(1).split(',')) {
+        const eq = kv.indexOf('=');
+
+        if (eq > 0) {
+          params[kv.slice(0, eq)] = kv.slice(eq + 1);
+        }
+      }
+    }
+    segs.push({ type, ...params });
+    lastIdx = re.lastIndex;
+  }
+  if (lastIdx < str.length) {
+    segs.push({ type: 'text', text: str.slice(lastIdx) });
+  }
+
+  return segs;
 }
 
 /**
@@ -1154,7 +1324,7 @@ function buildRawNonMessageEvent(raw: any, data: IPCEventMessage['data'], selfId
         card: raw.sender?.card ?? raw.member?.card ?? data.userName ?? '',
         nickname: raw.sender?.nickname ?? raw.member?.nickname ?? data.userName ?? ''
       },
-      getAvatarUrl: (size = 0) => `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`
+      getAvatarUrl: (size = 0) => data.userAvatar ?? `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`
     };
   }
 
@@ -1260,7 +1430,7 @@ function buildFallbackNonMessageEvent(
         nickname: data.userName ?? '',
         role: 'member'
       },
-      getAvatarUrl: (size = 0) => `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`
+      getAvatarUrl: (size = 0) => data.userAvatar ?? `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`
     };
   }
 
@@ -1365,12 +1535,22 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
     const isGroup = raw.message_type === 'group';
     const userId = raw.user_id ?? safeInt(data.userId, 10001);
     const groupId = raw.group_id ?? (isGroup ? safeInt(data.spaceId, 0) : 0);
-    const message: any[] = Array.isArray(raw.message) ? raw.message : [{ type: 'text', text: data.messageText }];
+    const message: any[] = Array.isArray(raw.message)
+      ? raw.message
+      : typeof raw.message === 'string'
+        ? parseCQMessage(raw.message)
+        : [{ type: 'text', text: data.messageText }];
 
     const normalizedMessage = normalizeSegments(message);
     const rawMessage = raw.raw_message ?? extractText(normalizedMessage);
     const atme = detectAtMe(normalizedMessage, selfId);
     const atall = detectAtAll(normalizedMessage);
+
+    // DEBUG: 追踪 at 段
+    const _atSegs = normalizedMessage.filter((s: any) => s.type === 'at');
+    const _firstAt = extractFirstAtTarget(normalizedMessage, selfId);
+
+    log('info', `[buildEvent:A] at段=${JSON.stringify(_atSegs)}, extractFirstAt=${_firstAt}, selfId=${selfId}, Bot.uin=${(globalThis as any).Bot?.uin}`);
 
     // 提取引用回复信息（e.source / e.hasReply）
     // icqq: raw.source = { user_id, seq, time, message }
@@ -1421,6 +1601,9 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
       atme,
       atall,
 
+      // ── at 目标预填（dealMsg 会覆盖，此处作为兜底） ──
+      at: extractFirstAtTarget(normalizedMessage, selfId) ?? undefined,
+
       // ── 引用回复信息（miao-plugin 用 e.source 解析被引用消息中的图片） ──
       source,
       hasReply,
@@ -1431,7 +1614,7 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
 
       reply,
       getMemberMap: () => (isGroup ? makeGroupProxy(groupId).getMemberMap() : new Map()),
-      getAvatarUrl: (size = 0) => data.userAvatar ?? `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`,
+      getAvatarUrl: (size = 0) => data.userAvatar || `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`,
       toString: () => rawMessage,
 
       // ── group / friend 代理（传递 raw 事件中的群信息） ──
@@ -1459,7 +1642,7 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
           nickname: raw.sender?.nickname ?? data.userName ?? '',
           role: raw.sender?.role ?? 'member'
         },
-        getAvatarUrl: (size = 0) => data.userAvatar ?? `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`
+        getAvatarUrl: (size = 0) => data.userAvatar || `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`
       },
 
       /** dealMsg 对 e.nickname 的兜底判断用 */
@@ -1548,9 +1731,12 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
     atme: detectAtMe(messageParts, selfId),
     atall: detectAtAll(messageParts),
 
+    // ── at 目标预填（dealMsg 会覆盖，此处作为兜底） ──
+    at: extractFirstAtTarget(messageParts, selfId) ?? undefined,
+
     reply,
     getMemberMap: () => (isGroup ? makeGroupProxy(groupId).getMemberMap() : new Map()),
-    getAvatarUrl: (size = 0) => data.userAvatar ?? `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`,
+    getAvatarUrl: (size = 0) => data.userAvatar || `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`,
     toString: () => data.messageText,
 
     // ── group / friend 代理 ──
@@ -1569,7 +1755,7 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
         nickname: data.userName ?? '',
         role: 'member'
       },
-      getAvatarUrl: (size = 0) => data.userAvatar ?? `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`
+      getAvatarUrl: (size = 0) => data.userAvatar || `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`
     },
 
     nickname: data.userName ?? 'User',
@@ -1600,6 +1786,56 @@ let PluginsLoader: any = null;
  * 这些指令应通过 #yz前缀 由 AlemonJS 管理层处理
  */
 const BLOCKED_COMMANDS = /^#(重启|停机|关机|(强制)?更新|(静默)?全部(强制)?更新)$/;
+
+/**
+ * 在 Bot 上发射 icqq 风格的分层事件
+ *
+ * icqq 会为一个事件触发多层：
+ *   message → message.group → message.group.normal
+ *   notice  → notice.group  → notice.group.increase
+ *   request → request.friend → request.friend.add
+ *
+ * yenai-plugin 等插件通过 Bot.on('notice.group.xxx') 监听，
+ * 不发射则这些 handler 永远不会被调用。
+ */
+function emitBotEvent(e: any): void {
+  const bot = (globalThis as any).Bot;
+
+  if (!bot?.emit) {
+    return;
+  }
+
+  const postType = e.post_type;
+
+  if (!postType) {
+    return;
+  }
+
+  // 第一层：post_type
+  bot.emit(postType, e);
+
+  // 第二层：post_type + sub1
+  let sub1 = '';
+
+  if (postType === 'message') {
+    sub1 = e.message_type ?? '';
+  } else if (postType === 'notice') {
+    // notice_type 如 group_increase → group.increase
+    sub1 = (e.notice_type ?? '').replace(/_/g, '.');
+  } else if (postType === 'request') {
+    sub1 = (e.request_type ?? '').replace(/_/g, '.');
+  }
+  if (sub1) {
+    bot.emit(`${postType}.${sub1}`, e);
+  }
+
+  // 第三层：post_type + sub1 + sub_type
+  const sub2 = e.sub_type ?? '';
+
+  if (sub1 && sub2) {
+    bot.emit(`${postType}.${sub1}.${sub2}`, e);
+  }
+}
 
 async function main(): Promise<void> {
   const cwd = process.cwd();
@@ -1812,6 +2048,9 @@ async function main(): Promise<void> {
       };
       void (async () => {
         try {
+          // 在 Bot 上发射 icqq 风格事件（供 Bot.on 监听器使用）
+          emitBotEvent(e);
+
           // 拦截 Yunzai 内部的重启/关机/更新指令
           const rawMsg = String(e.msg ?? '').trim();
 
