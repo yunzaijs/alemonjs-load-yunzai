@@ -1,4 +1,5 @@
 import { defineChildren, defineRouter, lazy, logger } from 'alemonjs';
+import apiRouter from './api-router';
 import { manager } from './yunzai';
 
 const responseRouter = defineRouter([
@@ -35,7 +36,7 @@ const responseRouter = defineRouter([
 
 export default defineChildren({
   register() {
-    return { responseRouter };
+    return { responseRouter, koaRouter: apiRouter };
   },
   async onCreated() {
     logger.info('[alemonjs-load-yunzai] 启动');

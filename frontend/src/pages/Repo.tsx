@@ -52,13 +52,13 @@ export default function Repo({ section }: { section: string }) {
   const [formData, setFormData] = useState<RepoData>({ ...INITIAL });
   const [plugins, setPlugins] = useState<PluginEntry[]>([]);
   const [saved, setSaved] = useState(false);
+  const [message, setMessage] = useState('');
 
   useEffect(() => {
     if (!window.API) {
       return;
     }
-    window.API.postMessage({ type: 'repo.init' });
-    window.API.onMessage(data => {
+    const handler = data => {
       if (data.type === 'repo.init') {
         const d = data.data ?? {};
         const arr2str = (v: unknown) => (Array.isArray(v) ? v.join(',') : String(v ?? ''));
@@ -88,8 +88,13 @@ export default function Repo({ section }: { section: string }) {
           }
         }
         setPlugins(list);
+      } else if (data.type === 'repo.result') {
+        setMessage((data.data as { message?: string })?.message ?? '保存完成');
       }
-    });
+    };
+
+    window.API.postMessage({ type: 'repo.init' });
+    window.API.onMessage(handler);
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -126,6 +131,7 @@ export default function Repo({ section }: { section: string }) {
 
   return (
     <form onSubmit={handleSubmit} className='py-2 space-y-3'>
+      {message && <PrimaryDiv className='rounded-xl px-4 py-3 text-sm animate-fade-in shadow-sm'>{message}</PrimaryDiv>}
       {section === 'auth' && (
         <SecondaryDiv className='rounded-xl overflow-hidden'>
           <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>

@@ -1,14 +1,10 @@
 import { HeaderDiv, SecondaryDiv, SidebarDiv } from '@alemonjs/react-ui';
-import React, { useState } from 'react';
+import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import From from './From';
 import Manage from './Manage';
 import Plugin from './Plugin';
 import Repo from './Repo';
-
-/* 在渲染前初始化 Desktop API */
-if (typeof window !== 'undefined' && window.createDesktopAPI && !window.API) {
-  window.API = window.createDesktopAPI();
-}
 
 const CONFIG_SECTIONS = [
   { key: 'qq', label: '💬 QQ 账号', short: '💬 QQ' },
@@ -27,8 +23,8 @@ const REPO_SECTIONS = [
   { key: 'plugins', label: '🧩 插件来源', short: '🧩 来源' }
 ];
 
-const CONFIG_KEYS = CONFIG_SECTIONS.map(s => s.key);
-const REPO_KEYS = REPO_SECTIONS.map(s => s.key);
+const CONFIG_KEYS = new Set(CONFIG_SECTIONS.map(s => s.key));
+const REPO_KEYS = new Set(REPO_SECTIONS.map(s => s.key));
 
 function NavItem({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
@@ -54,10 +50,17 @@ function Pill({ active, onClick, children, small }: { active: boolean; onClick: 
   );
 }
 
-export default function App() {
-  const [activeKey, setActiveKey] = useState('manage');
-  const isConfig = CONFIG_KEYS.includes(activeKey);
-  const isRepo = REPO_KEYS.includes(activeKey);
+export default function AppLayout() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const configMatch = location.pathname.match(/^\/config\/([^/]+)$/);
+  const repoMatch = location.pathname.match(/^\/repo\/([^/]+)$/);
+  const activeKey = configMatch?.[1] ?? repoMatch?.[1] ?? (location.pathname === '/plugin' ? 'plugin' : 'manage');
+  const isConfig = CONFIG_KEYS.has(activeKey);
+  const isRepo = REPO_KEYS.has(activeKey);
+  const go = (path: string) => {
+    void navigate(path);
+  };
 
   return (
     <SecondaryDiv className='min-h-screen lg:h-screen lg:flex lg:overflow-hidden'>
@@ -76,23 +79,23 @@ export default function App() {
           </div>
         </div>
 
-        <NavItem active={activeKey === 'manage'} onClick={() => setActiveKey('manage')}>
+        <NavItem active={activeKey === 'manage'} onClick={() => go('/manage')}>
           ⚡ 管理
         </NavItem>
-        <NavItem active={activeKey === 'plugin'} onClick={() => setActiveKey('plugin')}>
+        <NavItem active={activeKey === 'plugin'} onClick={() => go('/plugin')}>
           🔌 插件
         </NavItem>
 
         <div className='text-[10px] uppercase tracking-wider opacity-25 font-medium px-3 pt-4 pb-1'>仓库配置</div>
         {REPO_SECTIONS.map(s => (
-          <NavItem key={s.key} active={activeKey === s.key} onClick={() => setActiveKey(s.key)}>
+          <NavItem key={s.key} active={activeKey === s.key} onClick={() => go(`/repo/${s.key}`)}>
             {s.label}
           </NavItem>
         ))}
 
         <div className='text-[10px] uppercase tracking-wider opacity-25 font-medium px-3 pt-4 pb-1'>Miao-Yunzai</div>
         {CONFIG_SECTIONS.map(s => (
-          <NavItem key={s.key} active={activeKey === s.key} onClick={() => setActiveKey(s.key)}>
+          <NavItem key={s.key} active={activeKey === s.key} onClick={() => go(`/config/${s.key}`)}>
             {s.label}
           </NavItem>
         ))}
@@ -112,17 +115,17 @@ export default function App() {
             <div className='text-[13px] font-bold gradient-text'>Yunzai</div>
           </HeaderDiv>
           <div className='flex gap-1.5 px-3 py-1.5'>
-            <Pill active={activeKey === 'manage'} onClick={() => setActiveKey('manage')}>
+            <Pill active={activeKey === 'manage'} onClick={() => go('/manage')}>
               管理
             </Pill>
-            <Pill active={activeKey === 'plugin'} onClick={() => setActiveKey('plugin')}>
+            <Pill active={activeKey === 'plugin'} onClick={() => go('/plugin')}>
               插件
             </Pill>
             <Pill
               active={isRepo}
               onClick={() => {
                 if (!isRepo) {
-                  setActiveKey('auth');
+                  go('/repo/auth');
                 }
               }}
             >
@@ -132,7 +135,7 @@ export default function App() {
               active={isConfig}
               onClick={() => {
                 if (!isConfig) {
-                  setActiveKey('qq');
+                  go('/config/qq');
                 }
               }}
             >
@@ -142,7 +145,7 @@ export default function App() {
           {isRepo && (
             <div className='flex gap-1 px-3 pb-2 overflow-x-auto' style={{ scrollbarWidth: 'none' }}>
               {REPO_SECTIONS.map(s => (
-                <Pill key={s.key} active={activeKey === s.key} onClick={() => setActiveKey(s.key)} small>
+                <Pill key={s.key} active={activeKey === s.key} onClick={() => go(`/repo/${s.key}`)} small>
                   {s.short}
                 </Pill>
               ))}
@@ -151,7 +154,7 @@ export default function App() {
           {isConfig && (
             <div className='flex gap-1 px-3 pb-2 overflow-x-auto' style={{ scrollbarWidth: 'none' }}>
               {CONFIG_SECTIONS.map(s => (
-                <Pill key={s.key} active={activeKey === s.key} onClick={() => setActiveKey(s.key)} small>
+                <Pill key={s.key} active={activeKey === s.key} onClick={() => go(`/config/${s.key}`)} small>
                   {s.short}
                 </Pill>
               ))}

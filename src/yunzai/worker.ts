@@ -117,7 +117,7 @@ function injectGlobals(): void {
 
   /** 追加日志到当天 command.log 文件（sendLog 插件会读取） */
   const appendLog = (level: string, ...args: any[]) => {
-    log(level as any, ...args.map(String));
+    log(level, ...args.map(String));
     try {
       const cwd = process.cwd();
       const today = new Date().toISOString().slice(0, 10);

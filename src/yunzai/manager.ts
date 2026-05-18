@@ -535,7 +535,7 @@ class YunzaiManager {
 
   /** 发送任意消息给 Worker（用于 API 响应等） */
   sendToWorker(msg: ParentToWorker): void {
-    this.send(msg as any);
+    this.send(msg);
   }
 
   // ─── 内部方法 ───

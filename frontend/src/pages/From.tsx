@@ -177,7 +177,7 @@ export default function Form({ section }: { section: string }) {
 
     setFormData(prev => ({
       ...prev,
-      [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
+      [name]: type === 'checkbox' ? e.target.checked : value
     }));
   };
 
@@ -218,7 +218,7 @@ export default function Form({ section }: { section: string }) {
               <Txt id='pwd' value={formData.pwd} type='password' onChange={handleChange} />
             </Row>
             <Row label='登录平台'>
-              <Sel id='platform' value={formData.platform} onChange={handleChange as never}>
+              <Sel id='platform' value={formData.platform} onChange={handleChange}>
                 <option value='1'>安卓手机</option>
                 <option value='2'>aPad</option>
                 <option value='3'>安卓手表</option>
@@ -248,7 +248,7 @@ export default function Form({ section }: { section: string }) {
               <Txt id='masterQQ' value={formData.masterQQ} placeholder='12345,67890' onChange={handleChange} />
             </Row>
             <Row label='自动加好友'>
-              <Sel id='autoFriend' value={formData.autoFriend} onChange={handleChange as never}>
+              <Sel id='autoFriend' value={formData.autoFriend} onChange={handleChange}>
                 <option value='1'>自动同意</option>
                 <option value='0'>不处理</option>
               </Sel>
@@ -280,7 +280,7 @@ export default function Form({ section }: { section: string }) {
           </HeaderDiv>
           <PrimaryDiv className='px-4 py-0.5 divide-y divide-gray-200/10'>
             <Row label='日志等级'>
-              <Sel id='log_level' value={formData.log_level} onChange={handleChange as never}>
+              <Sel id='log_level' value={formData.log_level} onChange={handleChange}>
                 <option value='trace'>trace</option>
                 <option value='debug'>debug</option>
                 <option value='info'>info</option>
@@ -358,7 +358,7 @@ export default function Form({ section }: { section: string }) {
               <Txt id='singleCD' value={formData.singleCD} type='number' onChange={handleChange} />
             </Row>
             <Row label='仅@回复' tip='0-否 1-是 2-非主人仅@'>
-              <Sel id='onlyReplyAt' value={formData.onlyReplyAt} onChange={handleChange as never}>
+              <Sel id='onlyReplyAt' value={formData.onlyReplyAt} onChange={handleChange}>
                 <option value='0'>否</option>
                 <option value='1'>是</option>
                 <option value='2'>非主人仅@</option>
@@ -368,7 +368,7 @@ export default function Form({ section }: { section: string }) {
               <Txt id='botAlias' value={formData.botAlias} placeholder='云崽,云宝' onChange={handleChange} />
             </Row>
             <Row label='表情限制'>
-              <Sel id='imgAddLimit' value={formData.imgAddLimit} onChange={handleChange as never}>
+              <Sel id='imgAddLimit' value={formData.imgAddLimit} onChange={handleChange}>
                 <option value='0'>所有群员</option>
                 <option value='1'>群管理</option>
                 <option value='2'>仅主人</option>
@@ -378,7 +378,7 @@ export default function Form({ section }: { section: string }) {
               <Txt id='imgMaxSize' value={formData.imgMaxSize} type='number' onChange={handleChange} />
             </Row>
             <Row label='私聊添加'>
-              <Sel id='addPrivate' value={formData.addPrivate} onChange={handleChange as never}>
+              <Sel id='addPrivate' value={formData.addPrivate} onChange={handleChange}>
                 <option value='1'>允许</option>
                 <option value='0'>禁止</option>
               </Sel>
