@@ -1,6 +1,6 @@
 {
   "name": "alemonjs-load-yunzai",
-  "version": "0.0.20",
+  "version": "0.0.21",
   "description": "yunzai-bot",
   "author": "ningmengchongshui",
   "type": "module",
@@ -14,10 +14,15 @@
     "classnames": "^2.5.1",
     "isomorphic-git": "^1.37.4",
     "jsxp": "^1.3.0",
+    "koa-bodyparser": "^4.4.1",
+    "koa-router": "^14.0.0",
     "markdown-to-jsx": "^9.7.13",
     "md5": "^2.3.0"
   },
   "alemonjs": {
+    "web": {
+      "root": "dist"
+    },
     "desktop": {
       "command": [
         {
