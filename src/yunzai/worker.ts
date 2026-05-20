@@ -1288,6 +1288,7 @@ const EVENT_REQUEST_MAP: Record<string, { request_type: string; sub_type: string
 function buildRawNonMessageEvent(raw: any, data: IPCEventMessage['data'], selfId: number, reply: (msg: any, quote?: boolean) => any) {
   const userId = raw.user_id ?? safeInt(data.userId, 10001);
   const groupId = raw.group_id ?? safeInt(data.spaceId, 0);
+  const masterFlag = resolveMasterFlag(data);
 
   const e: any = {
     ...raw,
@@ -1296,9 +1297,9 @@ function buildRawNonMessageEvent(raw: any, data: IPCEventMessage['data'], selfId
     user_id: userId,
     group_id: groupId,
 
-    isMaster: data.isMaster,
-    isOwner: data.isMaster,
-    isAdmin: data.isMaster,
+    isMaster: masterFlag,
+    isOwner: masterFlag,
+    isAdmin: masterFlag,
 
     reply,
     getMemberMap: () => (groupId ? makeGroupProxy(groupId).getMemberMap() : new Map()),
@@ -1363,6 +1364,7 @@ function buildFallbackNonMessageEvent(
 ) {
   const userId = safeInt(data.userId, 10001);
   const groupId = data.isPrivate ? 0 : safeInt(data.spaceId, 0);
+  const masterFlag = resolveMasterFlag(data);
 
   const e: any = {
     self_id: selfId,
@@ -1370,9 +1372,9 @@ function buildFallbackNonMessageEvent(
     user_id: userId,
     group_id: groupId,
 
-    isMaster: data.isMaster,
-    isOwner: data.isMaster,
-    isAdmin: data.isMaster,
+    isMaster: masterFlag,
+    isOwner: masterFlag,
+    isAdmin: masterFlag,
 
     reply,
     getMemberMap: () => (groupId ? makeGroupProxy(groupId).getMemberMap() : new Map()),
@@ -1423,8 +1425,8 @@ function buildFallbackNonMessageEvent(
       card: data.userName ?? '',
       nickname: data.userName ?? '',
       role: 'member',
-      is_admin: data.isMaster,
-      is_owner: data.isMaster,
+      is_admin: masterFlag,
+      is_owner: masterFlag,
       _info: {
         card: data.userName ?? '',
         nickname: data.userName ?? '',
@@ -1469,8 +1471,13 @@ function injectMasterQQ(userId: number | string): void {
   }
 }
 
+function resolveMasterFlag(data: IPCEventMessage['data']): boolean {
+  return data.isMaster ?? data.IsMaster ?? false;
+}
+
 function buildEvent(data: IPCEventMessage['data'], msgId: string) {
   const raw = data.rawEvent;
+  const masterFlag = resolveMasterFlag(data);
   const botUin = (globalThis as any).Bot?.uin ?? 10000;
   // 优先使用 raw event 的 self_id（真实 Bot QQ 号），其次用 IPC 传入的 botId
   const selfId = raw?.self_id !== null && raw?.self_id !== undefined ? safeInt(raw.self_id, botUin) : safeInt(data.botId, botUin);
@@ -1482,7 +1489,7 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
   }
 
   // 跨平台 master 注入：确保 loader 的 cfg.masterQQ.includes() 检查通过
-  if (data.isMaster && data.userId) {
+  if (masterFlag && data.userId) {
     injectMasterQQ(data.userId);
   }
 
@@ -1608,9 +1615,9 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
       source,
       hasReply,
 
-      isMaster: data.isMaster,
-      isOwner: data.isMaster,
-      isAdmin: data.isMaster || raw.sender?.role === 'admin' || raw.sender?.role === 'owner',
+      isMaster: masterFlag,
+      isOwner: masterFlag,
+      isAdmin: masterFlag || raw.sender?.role === 'admin' || raw.sender?.role === 'owner',
 
       reply,
       getMemberMap: () => (isGroup ? makeGroupProxy(groupId).getMemberMap() : new Map()),
@@ -1718,9 +1725,9 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
     group_id: groupId,
     group_name: isGroup ? `Group ${groupId}` : '',
 
-    isMaster: data.isMaster,
-    isOwner: data.isMaster,
-    isAdmin: data.isMaster,
+    isMaster: masterFlag,
+    isOwner: masterFlag,
+    isAdmin: masterFlag,
 
     message_id: data.messageId ?? `cross_${Date.now()}`,
     seq: Date.now(),
@@ -1748,8 +1755,8 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
       card: data.userName ?? '',
       nickname: data.userName ?? '',
       role: 'member',
-      is_admin: data.isMaster,
-      is_owner: data.isMaster,
+      is_admin: masterFlag,
+      is_owner: masterFlag,
       _info: {
         card: data.userName ?? '',
         nickname: data.userName ?? '',

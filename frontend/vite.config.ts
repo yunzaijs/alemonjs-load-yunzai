@@ -1,8 +1,10 @@
+import { readFileSync } from 'fs';
 import theme from '@alemonjs/react-ui/theme.json';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath, URL } from 'url';
 import { defineConfig } from 'vite';
 const NODE_ENV = process.env.NODE_ENV === 'development';
+const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf-8')) as { version?: string };
 
 export default defineConfig({
   base: NODE_ENV ? '/' : './',
@@ -16,7 +18,8 @@ export default defineConfig({
     }
   },
   define: {
-    'process.env.ALEMONJS_CSS_VARIABLES': NODE_ENV ? JSON.stringify(theme) : '{}'
+    'process.env.ALEMONJS_CSS_VARIABLES': NODE_ENV ? JSON.stringify(theme) : '{}',
+    __APP_VERSION__: JSON.stringify(pkg.version ?? '0.0.0')
   },
   plugins: [react()],
   resolve: {

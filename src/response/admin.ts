@@ -28,7 +28,7 @@ export default async (e: EventsEnum, next: Next) => {
     return;
   }
 
-  if (!event.IsMaster) {
+  if (!(event.IsMaster || event.isMaster)) {
     next();
 
     return;

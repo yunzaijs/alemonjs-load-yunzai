@@ -912,6 +912,7 @@ export default (e: EventsEnum, next: Next) => {
       spaceId: e.GuildId ?? e.ChannelId ?? '',
       isPrivate: !e.GuildId,
       isMaster: e.IsMaster ?? false,
+      IsMaster: e.IsMaster ?? false,
       atUsers: _atUsers,
       rawEvent: _rawEvent
     }

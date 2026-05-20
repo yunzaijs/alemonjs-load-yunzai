@@ -6,6 +6,8 @@ import Manage from './Manage';
 import Plugin from './Plugin';
 import Repo from './Repo';
 
+const APP_VERSION = __APP_VERSION__;
+
 const CONFIG_SECTIONS = [
   { key: 'qq', label: '💬 QQ 账号', short: '💬 QQ' },
   { key: 'feature', label: '🔧 功能开关', short: '🔧 功能' },
@@ -75,7 +77,10 @@ export default function AppLayout() {
           </div>
           <div>
             <div className='text-[13px] font-bold gradient-text leading-tight'>Yunzai</div>
-            <div className='text-[9px] opacity-30'>AlemonJS</div>
+            <div className='flex items-center gap-1.5 text-[9px] opacity-30'>
+              <span>AlemonJS</span>
+              <span className='rounded-full px-1.5 py-0.5 border border-current/15 opacity-70'>{APP_VERSION}</span>
+            </div>
           </div>
         </div>
 
@@ -112,7 +117,10 @@ export default function AppLayout() {
             >
               ⚡
             </div>
-            <div className='text-[13px] font-bold gradient-text'>Yunzai</div>
+            <div className='flex items-center gap-1.5 min-w-0'>
+              <div className='text-[13px] font-bold gradient-text'>Yunzai</div>
+              <div className='rounded-full px-1.5 py-0.5 text-[9px] border border-current/10 opacity-45 shrink-0'>{APP_VERSION}</div>
+            </div>
           </HeaderDiv>
           <div className='flex gap-1.5 px-3 py-1.5'>
             <Pill active={activeKey === 'manage'} onClick={() => go('/manage')}>

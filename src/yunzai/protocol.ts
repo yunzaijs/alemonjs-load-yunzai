@@ -52,7 +52,9 @@ export interface IPCEventMessage {
     isPrivate: boolean;
 
     // ── 权限 ──
-    isMaster: boolean;
+    // 兼容旧链路的 IsMaster 和当前链路的 isMaster
+    isMaster?: boolean;
+    IsMaster?: boolean;
 
     // ── @提及信息（跨平台提取，无 rawEvent 时用于构建 at 段） ──
     /** 被@的用户列表 */

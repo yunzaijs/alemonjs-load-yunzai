@@ -46,12 +46,12 @@ apiRouter.post('/yunzai/config', ctx => {
   };
 });
 
-apiRouter.get('/yunzai/status', ctx => {
+apiRouter.get('/yunzai/status', async ctx => {
   ctx.status = 200;
   ctx.body = {
     code: 200,
     message: 'ok',
-    data: getStatusData()
+    data: await getStatusData()
   };
 });
 

@@ -2,7 +2,7 @@ import { getConfig, getConfigValue } from 'alemonjs';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import YAML from 'yaml';
-import { getAllPlugins, getPluginInfo, getYunzaiDir } from './path';
+import { getAllPlugins, getGhProxy, getPluginInfo, getYunzaiDir } from './path';
 import { manager } from './yunzai/manager';
 
 type PrimitiveRecord = Record<string, unknown>;
@@ -10,6 +10,7 @@ type PrimitiveRecord = Record<string, unknown>;
 export interface PluginItem {
   name: string;
   installed: boolean;
+  isGit: boolean;
 }
 
 export interface CatalogItem {
@@ -18,6 +19,170 @@ export interface CatalogItem {
   aliases: string[];
   repoUrl: string;
   installed: boolean;
+}
+
+export interface OnlineCatalogItem {
+  dirName: string;
+  label: string;
+  repoUrl: string;
+  author: string;
+  description: string;
+  category: string;
+  installed: boolean;
+}
+
+type OnlineIndexCache = {
+  fetchedAt: number;
+  data: OnlineCatalogItem[];
+  pending?: Promise<OnlineCatalogItem[]>;
+};
+
+const ONLINE_INDEX_URLS = [
+  { category: '推荐插件', url: 'https://raw.githubusercontent.com/yhArcadia/Yunzai-Bot-plugins-index/main/README.md' },
+  { category: '功能类插件', url: 'https://raw.githubusercontent.com/yhArcadia/Yunzai-Bot-plugins-index/main/Function-Plugin.md' },
+  { category: '游戏IP类插件', url: 'https://raw.githubusercontent.com/yhArcadia/Yunzai-Bot-plugins-index/main/Game-Plugin.md' },
+  { category: '文游类插件', url: 'https://raw.githubusercontent.com/yhArcadia/Yunzai-Bot-plugins-index/main/WordGame-Plugin.md' },
+  { category: '单JS类插件', url: 'https://raw.githubusercontent.com/yhArcadia/Yunzai-Bot-plugins-index/main/JS-Plugin.md' }
+] as const;
+
+const ONLINE_INDEX_CACHE_TTL = 10 * 60 * 1000;
+const onlineIndexCache: OnlineIndexCache = {
+  fetchedAt: 0,
+  data: []
+};
+
+function withGitHubProxy(url: string): string {
+  if (!/^https:\/\/(raw\.githubusercontent\.com|github\.com)\//.test(url)) {
+    return url;
+  }
+
+  const proxy = getGhProxy();
+
+  if (!proxy || url.startsWith(proxy)) {
+    return url;
+  }
+
+  return `${proxy}${url}`;
+}
+
+function normalizeMarkdown(value: string): string {
+  return value
+    .replace(/<details[\s\S]*?<\/details>/g, ' ')
+    .replace(/\r/g, '')
+    .replace(/\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function textFromMarkdown(value: string): string {
+  return value
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[`*]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function repoDirNameFromUrl(repoUrl: string): string {
+  const cleanUrl = repoUrl.replace(/\/+$/, '').replace(/\.git$/, '');
+  const dirName = cleanUrl.split('/').pop() ?? 'unknown-plugin';
+
+  return dirName.trim();
+}
+
+function parseOnlineCatalogRows(markdown: string, category: string): OnlineCatalogItem[] {
+  const rows: OnlineCatalogItem[] = [];
+  const source = normalizeMarkdown(markdown);
+  const rowReg = /\|\s*\[([^\]]+)\]\((https?:\/\/[^)]+)\)\s*\|\s*(.*?)\s*\|\s*([^|]+?)\s*\|/g;
+  const seen = new Set<string>();
+  let match: RegExpExecArray | null = null;
+
+  while ((match = rowReg.exec(source))) {
+    const [, labelRaw, repoUrlRaw, authorRaw, descriptionRaw] = match;
+    const repoUrl = repoUrlRaw.trim();
+    const dirName = repoDirNameFromUrl(repoUrl);
+    const dedupeKey = `${category}:${repoUrl}`;
+
+    if (!repoUrl || seen.has(dedupeKey)) {
+      continue;
+    }
+    seen.add(dedupeKey);
+    rows.push({
+      dirName,
+      label: textFromMarkdown(labelRaw),
+      repoUrl,
+      author: textFromMarkdown(authorRaw),
+      description: textFromMarkdown(descriptionRaw),
+      category,
+      installed: false
+    });
+  }
+
+  return rows;
+}
+
+async function fetchOnlineCatalog(): Promise<OnlineCatalogItem[]> {
+  const responses = await Promise.all(
+    ONLINE_INDEX_URLS.map(async item => {
+      const response = await fetch(withGitHubProxy(item.url));
+
+      if (!response.ok) {
+        throw new Error(`在线插件索引加载失败: ${item.url}`);
+      }
+
+      return {
+        category: item.category,
+        markdown: await response.text()
+      };
+    })
+  );
+
+  const merged = new Map<string, OnlineCatalogItem>();
+
+  for (const item of responses) {
+    const rows = parseOnlineCatalogRows(item.markdown, item.category);
+
+    for (const row of rows) {
+      const key = `${row.repoUrl}::${row.dirName}`;
+
+      if (!merged.has(key)) {
+        merged.set(key, row);
+      }
+    }
+  }
+
+  return Array.from(merged.values());
+}
+
+export async function getOnlineCatalogData(forceRefresh = false): Promise<OnlineCatalogItem[]> {
+  const now = Date.now();
+
+  if (!forceRefresh && onlineIndexCache.data.length > 0 && now - onlineIndexCache.fetchedAt < ONLINE_INDEX_CACHE_TTL) {
+    return onlineIndexCache.data;
+  }
+
+  if (!forceRefresh && onlineIndexCache.pending) {
+    return onlineIndexCache.pending;
+  }
+
+  onlineIndexCache.pending = (async () => {
+    const installedPlugins = manager.isInstalled ? getInstalledPlugins() : [];
+    const installedSet = new Set(installedPlugins.map(p => p.name));
+    const data = (await fetchOnlineCatalog()).map(item => ({
+      ...item,
+      installed: installedSet.has(item.dirName)
+    }));
+
+    onlineIndexCache.data = data;
+    onlineIndexCache.fetchedAt = Date.now();
+
+    return data;
+  })();
+
+  try {
+    return await onlineIndexCache.pending;
+  } finally {
+    delete onlineIndexCache.pending;
+  }
 }
 
 function getInstalledPlugins(): PluginItem[] {
@@ -29,7 +194,15 @@ function getInstalledPlugins(): PluginItem[] {
 
   return readdirSync(pluginsDir, { withFileTypes: true })
     .filter(d => d.isDirectory())
-    .map(d => ({ name: d.name, installed: true }));
+    .map(d => {
+      const pluginDir = join(pluginsDir, d.name);
+
+      return {
+        name: d.name,
+        installed: true,
+        isGit: existsSync(join(pluginDir, '.git'))
+      };
+    });
 }
 
 function getLogCount(): number {
@@ -214,12 +387,15 @@ export function getRepoData() {
     config = {};
   }
 
-  const yunzaiCfg = config.yunzai ?? {};
+  const qqBotCfg = config['qq-bot'] ?? {};
+  const qqCfg = config.qq ?? {};
   const pkgCfg = config['alemonjs-load-yunzai'] ?? {};
+  const masterKey = config.master_key ?? qqBotCfg.master_key ?? qqCfg.master_key;
+  const masterId = config.master_id ?? qqBotCfg.master_id ?? qqCfg.master_id;
 
   return {
-    master_key: yunzaiCfg.master_key,
-    master_id: yunzaiCfg.master_id,
+    master_key: masterKey,
+    master_id: masterId,
     gh_proxy: pkgCfg.gh_proxy ? String(pkgCfg.gh_proxy) : 'https://ghfast.top/',
     bot_name: pkgCfg.bot_name ? String(pkgCfg.bot_name) : 'Miao-Yunzai',
     yunzai_repo: pkgCfg.yunzai_repo ? String(pkgCfg.yunzai_repo) : 'https://github.com/yoimiya-kokomi/Miao-Yunzai.git',
@@ -231,12 +407,27 @@ export function getRepoData() {
 export function saveRepoData(db: PrimitiveRecord) {
   const config = getConfig();
   const value = config.value ?? {};
+  const masterKey = csv2arr(db.master_key);
+  const masterId = csv2arr(db.master_id);
 
-  value.yunzai = {
-    ...value.yunzai,
-    master_key: csv2arr(db.master_key),
-    master_id: csv2arr(db.master_id)
-  };
+  value.master_key = masterKey;
+  value.master_id = masterId;
+
+  if (value['qq-bot'] && typeof value['qq-bot'] === 'object') {
+    value['qq-bot'] = {
+      ...value['qq-bot'],
+      master_key: masterKey,
+      master_id: masterId
+    };
+  }
+
+  if (value.qq && typeof value.qq === 'object') {
+    value.qq = {
+      ...value.qq,
+      master_key: masterKey,
+      master_id: masterId
+    };
+  }
 
   const pkg = value['alemonjs-load-yunzai'] ?? {};
 
@@ -251,7 +442,7 @@ export function saveRepoData(db: PrimitiveRecord) {
   config.saveValue(value);
 }
 
-export function getStatusData() {
+export async function getStatusData() {
   const installedPlugins = manager.isInstalled ? getInstalledPlugins() : [];
   const installedSet = new Set(installedPlugins.map(p => p.name));
   const catalog: CatalogItem[] = getAllPlugins().map(p => ({
@@ -261,6 +452,7 @@ export function getStatusData() {
     repoUrl: p.repoUrl,
     installed: installedSet.has(p.dirName)
   }));
+  const onlineCatalog = await getOnlineCatalogData().catch(() => []);
 
   return {
     status: manager.getStatus(),
@@ -270,6 +462,7 @@ export function getStatusData() {
     busyTask: manager.busyTaskName,
     plugins: installedPlugins,
     catalog,
+    onlineCatalog,
     logCount: manager.isInstalled ? getLogCount() : 0,
     help: {
       installFlow: [

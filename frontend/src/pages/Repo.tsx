@@ -48,11 +48,25 @@ function SaveBtn({ saved }: { saved: boolean }) {
   );
 }
 
+function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <Button
+      type='button'
+      className={`px-3 py-1 text-[11px] rounded-lg font-medium ${active ? 'opacity-100' : 'opacity-45 hover:opacity-70'}`}
+      style={active ? { background: 'var(--alemonjs-primary-bg, rgba(128,128,128,.1))' } : undefined}
+      onClick={onClick}
+    >
+      {children}
+    </Button>
+  );
+}
+
 export default function Repo({ section }: { section: string }) {
   const [formData, setFormData] = useState<RepoData>({ ...INITIAL });
   const [plugins, setPlugins] = useState<PluginEntry[]>([]);
   const [saved, setSaved] = useState(false);
   const [message, setMessage] = useState('');
+  const [repoTab, setRepoTab] = useState<'yunzai' | 'miao'>('yunzai');
 
   useEffect(() => {
     if (!window.API) {
@@ -173,25 +187,41 @@ export default function Repo({ section }: { section: string }) {
             </div>
             <SaveBtn saved={saved} />
           </HeaderDiv>
-          <PrimaryDiv className='px-4 py-0.5 divide-y divide-gray-200/10'>
-            <Row label='Yunzai 仓库'>
-              <Input
-                name='yunzai_repo'
-                value={formData.yunzai_repo}
-                placeholder='https://github.com/.../Miao-Yunzai.git'
-                onChange={handleChange}
-                className='w-full px-3 py-1.5 text-sm rounded-lg'
-              />
-            </Row>
-            <Row label='Miao 插件仓库'>
-              <Input
-                name='miao_plugin_repo'
-                value={formData.miao_plugin_repo}
-                placeholder='https://github.com/.../miao-plugin.git'
-                onChange={handleChange}
-                className='w-full px-3 py-1.5 text-sm rounded-lg'
-              />
-            </Row>
+          <PrimaryDiv className='px-4 py-3 space-y-3'>
+            <div className='flex items-center gap-2'>
+              <TabBtn active={repoTab === 'yunzai'} onClick={() => setRepoTab('yunzai')}>
+                Yunzai 仓库
+              </TabBtn>
+              <TabBtn active={repoTab === 'miao'} onClick={() => setRepoTab('miao')}>
+                Miao 插件仓库
+              </TabBtn>
+            </div>
+
+            {repoTab === 'yunzai' && (
+              <div className='space-y-2'>
+                <div className='text-[11px] opacity-40'>主仓库地址</div>
+                <Input
+                  name='yunzai_repo'
+                  value={formData.yunzai_repo}
+                  placeholder='https://github.com/.../Miao-Yunzai.git'
+                  onChange={handleChange}
+                  className='w-full px-3 py-1.5 text-sm rounded-lg'
+                />
+              </div>
+            )}
+
+            {repoTab === 'miao' && (
+              <div className='space-y-2'>
+                <div className='text-[11px] opacity-40'>默认插件仓库地址</div>
+                <Input
+                  name='miao_plugin_repo'
+                  value={formData.miao_plugin_repo}
+                  placeholder='https://github.com/.../miao-plugin.git'
+                  onChange={handleChange}
+                  className='w-full px-3 py-1.5 text-sm rounded-lg'
+                />
+              </div>
+            )}
           </PrimaryDiv>
         </SecondaryDiv>
       )}

@@ -47,7 +47,7 @@ export const activate = context => {
       } else if (data.type === 'yunzai.status') {
         webView.postMessage({
           type: 'yunzai.status',
-          data: getStatusData()
+          data: await getStatusData()
         });
       } else if (data.type === 'yunzai.action') {
         try {
