@@ -19,7 +19,8 @@ export interface IPCEventMessage {
         userAvatar: string;
         spaceId: string;
         isPrivate: boolean;
-        isMaster: boolean;
+        isMaster?: boolean;
+        IsMaster?: boolean;
         atUsers?: {
             userId: string;
             userName?: string;

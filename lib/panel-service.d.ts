@@ -2,6 +2,7 @@ type PrimitiveRecord = Record<string, unknown>;
 export interface PluginItem {
     name: string;
     installed: boolean;
+    isGit: boolean;
 }
 export interface CatalogItem {
     dirName: string;
@@ -10,6 +11,16 @@ export interface CatalogItem {
     repoUrl: string;
     installed: boolean;
 }
+export interface OnlineCatalogItem {
+    dirName: string;
+    label: string;
+    repoUrl: string;
+    author: string;
+    description: string;
+    category: string;
+    installed: boolean;
+}
+export declare function getOnlineCatalogData(forceRefresh?: boolean): Promise<OnlineCatalogItem[]>;
 export declare function getYunzaiFormData(): {
     log_level: {};
     resend: {};
@@ -60,7 +71,7 @@ export declare function getRepoData(): {
     plugins: any;
 };
 export declare function saveRepoData(db: PrimitiveRecord): void;
-export declare function getStatusData(): {
+export declare function getStatusData(): Promise<{
     status: string;
     installed: boolean;
     running: boolean;
@@ -68,6 +79,7 @@ export declare function getStatusData(): {
     busyTask: string;
     plugins: PluginItem[];
     catalog: CatalogItem[];
+    onlineCatalog: never[] | OnlineCatalogItem[];
     logCount: number;
     help: {
         installFlow: {
@@ -87,7 +99,7 @@ export declare function getStatusData(): {
             color: string;
         }[];
     };
-};
+}>;
 export declare function runYunzaiAction(data: PrimitiveRecord): Promise<{
     message: string;
 }>;
