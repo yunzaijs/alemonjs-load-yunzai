@@ -3570,7 +3570,7 @@ jsonfile@^6.0.1:
     object.assign "^4.1.4"
     object.values "^1.1.6"
 
-jsxp@^1.3.0:
+jsxp@^1.4.0:
   version "1.4.0"
   resolved "https://registry.npmmirror.com/jsxp/-/jsxp-1.4.0.tgz#a1a3fd52dfffcd5ffc4b13dd1260938b01dc2f49"
   integrity sha512-fYlmXVy/q3h40v0xDkfnm4Y8n4PZ7o38fv8NwXB6G4/fICbv8+OB9Et2X+QMzaoCxKrYwPioJ93spKtDi85VYA==
