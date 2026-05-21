@@ -34,6 +34,7 @@ declare class YunzaiManager {
     installAndStart(repoUrl?: string): Promise<void>;
     uninstall(): Promise<void>;
     private syncRedisConfig;
+    private validateRequiredPlugins;
     private startInternal;
     private stopInternal;
     send(msg: ParentToWorker): void;
@@ -49,6 +50,10 @@ declare class YunzaiManager {
     private execGit;
     private npmInstall;
     installPlugin(plugin: PluginInfo): Promise<void>;
+    installPluginArchive(archivePath: string, options?: {
+        dirName?: string;
+        originalName?: string;
+    }): Promise<PluginInfo>;
     updatePlugin(plugin: PluginInfo, force?: boolean): Promise<string>;
     uninstallPlugin(plugin: PluginInfo): void;
     installDeps(): Promise<string>;

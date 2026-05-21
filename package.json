@@ -1,6 +1,6 @@
 {
   "name": "alemonjs-load-yunzai",
-  "version": "0.0.22",
+  "version": "0.0.23",
   "description": "yunzai-bot",
   "author": "ningmengchongshui",
   "type": "module",
@@ -11,13 +11,16 @@
     "./desktop": "./lib/desktop.js"
   },
   "dependencies": {
+    "@koa/multer": "^4.0.0",
     "classnames": "^2.5.1",
+    "extract-zip": "^2.0.1",
     "isomorphic-git": "^1.37.4",
     "jsxp": "^1.4.0",
     "koa-bodyparser": "^4.4.1",
     "koa-router": "^14.0.0",
     "markdown-to-jsx": "^9.7.13",
-    "md5": "^2.3.0"
+    "md5": "^2.3.0",
+    "multer": "^2.0.2"
   },
   "alemonjs": {
     "web": {
@@ -55,9 +58,9 @@
     "registry": "https://registry.npmjs.org",
     "access": "public"
   },
-  "bugs": "https://github.com/xiuxianjs/alemonjs-load-yunzai/issues",
+  "bugs": "https://github.com/yunzaijs/alemonjs-load-yunzai/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/xiuxianjs/alemonjs-load-yunzai.git"
+    "url": "https://github.com/yunzaijs/alemonjs-load-yunzai.git"
   }
 }

@@ -8,6 +8,22 @@
 
 <img src="./image.png">
 
+## 架构链路
+
+当前实现明确收口为两条入口链路：
+
+- `web -> api -> koa进程(机器人进程) -> Yunzai进程`
+- `webview -> 桌面主进程 -> desktop子进程 -> 机器人进程 -> Yunzai子进程`
+
+边界说明：
+
+- `koa` 与机器人控制核心同进程，Web 前端只通过 `/api` 访问，不使用文件总线。
+- `desktop` 是独立子进程，不是机器人进程本体；当前与机器人主进程的跨进程交互范围仅收口到“机器人状态”。
+- `manager` 是机器人进程内唯一的 Yunzai 控制面。
+- `worker` / `Yunzai` 为独立子进程，不直接暴露给 Web 或 desktop。
+
+详细拓扑、职责和升级路径见 [docs/architecture.md](./docs/architecture.md)。
+
 ### 安装
 
 请访问官网 https://alemonjs.com 先安装 桌面/web版,
@@ -17,7 +33,7 @@
 - 仓库地址
 
 ```sh
-https://github.com/xiuxianjs/alemonjs-load-yunzai.git
+https://github.com/yunzaijs/alemonjs-load-yunzai.git
 ```
 
 - 仓库分支

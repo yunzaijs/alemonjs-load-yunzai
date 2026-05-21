@@ -1,9 +1,4 @@
 type PrimitiveRecord = Record<string, unknown>;
-export interface PluginItem {
-    name: string;
-    installed: boolean;
-    isGit: boolean;
-}
 export interface CatalogItem {
     dirName: string;
     label: string;
@@ -20,7 +15,20 @@ export interface OnlineCatalogItem {
     category: string;
     installed: boolean;
 }
+export interface LogFileItem {
+    name: string;
+    size: number;
+    updatedAt: number;
+}
+export interface LogViewerData {
+    files: LogFileItem[];
+    activeFile: string;
+    content: string;
+    truncated: boolean;
+    updatedAt: number;
+}
 export declare function getOnlineCatalogData(forceRefresh?: boolean): Promise<OnlineCatalogItem[]>;
+export declare function getLogViewerData(fileName?: string, maxLines?: number): LogViewerData;
 export declare function getYunzaiFormData(): {
     log_level: {};
     resend: {};
@@ -72,15 +80,7 @@ export declare function getRepoData(): {
 };
 export declare function saveRepoData(db: PrimitiveRecord): void;
 export declare function getStatusData(): Promise<{
-    status: string;
-    installed: boolean;
-    running: boolean;
-    busy: boolean;
-    busyTask: string;
-    plugins: PluginItem[];
-    catalog: CatalogItem[];
     onlineCatalog: never[] | OnlineCatalogItem[];
-    logCount: number;
     help: {
         installFlow: {
             step: string;
@@ -99,8 +99,23 @@ export declare function getStatusData(): Promise<{
             color: string;
         }[];
     };
+    status: string;
+    installed: boolean;
+    running: boolean;
+    busy: boolean;
+    busyTask: string;
+    plugins: import("./yunzai/control").PluginItem[];
+    catalog: import("./yunzai/control").CatalogItem[];
+    logCount: number;
+    updatedAt: number;
 }>;
 export declare function runYunzaiAction(data: PrimitiveRecord): Promise<{
+    message: string;
+}>;
+export declare function uploadYunzaiPluginArchive(filePath: string, options?: {
+    dirName?: string;
+    originalName?: string;
+}): Promise<{
     message: string;
 }>;
 export {};
