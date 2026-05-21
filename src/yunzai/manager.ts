@@ -7,9 +7,11 @@
  * 3. IPC 通信 — 父子进程消息收发
  */
 import { getConfigValue, logger } from 'alemonjs';
+import extractZip from 'extract-zip';
 import type { ChildProcess } from 'node:child_process';
 import { execFile, fork } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PluginInfo } from '../path';
 import { getDefaultRepo, getGhProxy, getYunzaiDir, WORKER_PATH, YARN_PATH } from '../path';
@@ -23,6 +25,46 @@ type ApiRequestHandler = (req: IPCApiRequest) => void;
 /** 启动失败标记文件路径（存在 = 上次反复崩溃） */
 function getStartFailedPath(): string {
   return join(getYunzaiDir(), '.last_start_failed');
+}
+
+function sanitizePluginDirName(name: string): string {
+  return name
+    .trim()
+    .replace(/\.zip$/i, '')
+    .replace(/[\\/:"*?<>|]+/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function pluginLooksValid(dir: string): boolean {
+  return existsSync(join(dir, 'package.json')) || existsSync(join(dir, 'apps')) || existsSync(join(dir, 'lib')) || existsSync(join(dir, 'index.js'));
+}
+
+function getPluginCandidateEntries(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true })
+    .filter(entry => entry.name !== '__MACOSX')
+    .map(entry => entry.name);
+}
+
+function resolveArchivePluginRoot(extractDir: string): { pluginRoot: string; suggestedDirName: string | null } {
+  if (pluginLooksValid(extractDir)) {
+    return { pluginRoot: extractDir, suggestedDirName: null };
+  }
+
+  const entries = getPluginCandidateEntries(extractDir);
+
+  if (entries.length === 1) {
+    const singleEntryDir = join(extractDir, entries[0]);
+
+    if (pluginLooksValid(singleEntryDir)) {
+      return {
+        pluginRoot: singleEntryDir,
+        suggestedDirName: sanitizePluginDirName(entries[0])
+      };
+    }
+  }
+
+  throw new Error('ZIP 中未识别到有效插件目录，请确认压缩包内包含 package.json、apps、lib 或 index.js');
 }
 
 class YunzaiManager {
@@ -359,6 +401,42 @@ class YunzaiManager {
     }
   }
 
+  /** 启动前检查框架必要插件，优先给出明确提示而不是等 Worker 报模块错误 */
+  private validateRequiredPlugins(): void {
+    const yunzaiDir = getYunzaiDir();
+    const pkgPath = join(yunzaiDir, 'package.json');
+
+    if (!existsSync(pkgPath)) {
+      return;
+    }
+
+    let pkg: any;
+
+    try {
+      pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    } catch (err: any) {
+      logger.warn(`[Yunzai] 启动前检查跳过: package.json 解析失败: ${err.message}`);
+
+      return;
+    }
+
+    const pkgName = String(pkg?.name ?? '').toLowerCase();
+    const missing: string[] = [];
+
+    if (pkgName === 'miao-yunzai' || pkgName === 'miao_yunzai') {
+      const miaoPluginDir = join(yunzaiDir, 'plugins', 'miao-plugin');
+      const miaoPluginEntry = join(miaoPluginDir, 'components', 'index.js');
+
+      if (!existsSync(miaoPluginDir) || !existsSync(miaoPluginEntry)) {
+        missing.push('miao-plugin');
+      }
+    }
+
+    if (missing.length > 0) {
+      throw new Error(`当前为 Miao-Yunzai，缺少必要插件: ${missing.join(', ')}。请先发送 #yz安装插件miao，安装完成后再发送 #yz启动`);
+    }
+  }
+
   private async startInternal(): Promise<void> {
     if (this.isRunning) {
       throw new Error('Worker 已在运行');
@@ -370,6 +448,9 @@ class YunzaiManager {
     }
 
     this.ready = false;
+
+    // ── 启动前检查必要插件（如 Miao-Yunzai 依赖 miao-plugin） ──
+    this.validateRequiredPlugins();
 
     // ── 同步 AlemonJS 的 Redis 配置到 Miao-Yunzai ──
     this.syncRedisConfig();
@@ -651,6 +732,74 @@ class YunzaiManager {
       }
       throw err;
     } finally {
+      this.endTask();
+    }
+  }
+
+  async installPluginArchive(archivePath: string, options?: { dirName?: string; originalName?: string }): Promise<PluginInfo> {
+    if (!this.isInstalled) {
+      throw new Error('Yunzai 未安装');
+    }
+
+    const tempRoot = mkdtempSync(join(tmpdir(), 'alemonjs-yunzai-plugin-'));
+    const extractDir = join(tempRoot, 'extract');
+    let pluginDir = '';
+
+    this.beginTask('安装插件压缩包');
+    try {
+      mkdirSync(extractDir, { recursive: true });
+      await extractZip(archivePath, { dir: extractDir });
+      this.throwIfCancelled();
+
+      const { pluginRoot, suggestedDirName } = resolveArchivePluginRoot(extractDir);
+      const baseName = options?.dirName ?? suggestedDirName ?? options?.originalName ?? 'uploaded-plugin';
+      const dirName = sanitizePluginDirName(baseName);
+
+      if (!dirName) {
+        throw new Error('无法确定插件目录名，请重新命名 ZIP 文件后再上传');
+      }
+
+      pluginDir = join(getYunzaiDir(), 'plugins', dirName);
+
+      if (existsSync(pluginDir)) {
+        throw new Error(`${dirName} 已安装`);
+      }
+
+      mkdirSync(join(getYunzaiDir(), 'plugins'), { recursive: true });
+
+      if (pluginRoot === extractDir) {
+        mkdirSync(pluginDir, { recursive: true });
+
+        for (const entry of getPluginCandidateEntries(pluginRoot)) {
+          renameSync(join(pluginRoot, entry), join(pluginDir, entry));
+        }
+      } else {
+        cpSync(pluginRoot, pluginDir, { recursive: true });
+      }
+
+      this.throwIfCancelled();
+      this.ensureWorkspaces();
+      logger.info(`[Yunzai] 正在为 ${dirName} 安装依赖...`);
+      await this.npmInstall(getYunzaiDir());
+      this.throwIfCancelled();
+      logger.info(`[Yunzai] ${dirName} 安装完成`);
+
+      return {
+        dirName,
+        repoUrl: '',
+        label: dirName
+      };
+    } catch (err) {
+      if (pluginDir && existsSync(pluginDir)) {
+        try {
+          rmSync(pluginDir, { recursive: true, force: true });
+        } catch {}
+      }
+      throw err;
+    } finally {
+      try {
+        rmSync(tempRoot, { recursive: true, force: true });
+      } catch {}
       this.endTask();
     }
   }

@@ -14,7 +14,7 @@ export default async (e: EventsEnum) => {
   const [message] = useMessage(event);
 
   // 提取别名：去掉前缀 #yz插件说明
-  const alias = e.MessageText.replace(/^(!|！|\/|#|＃)(yz|云崽)\s*插件说明\s*/, '').trim();
+  const alias = e.MessageText.replace(/^(\/|#|＃)(yz|云崽)\s*插件说明\s*/, '').trim();
 
   if (!alias) {
     const format = Format.create();

@@ -141,6 +141,26 @@ textarea,
   background-clip: text;
 }
 
+.brand-badge {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(232, 236, 240, 0.88));
+  color: #111827;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+html.dark {
+  .brand-badge {
+    background: linear-gradient(135deg, rgba(17, 24, 39, 0.96), rgba(55, 65, 81, 0.88));
+    color: #f9fafb;
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow:
+      0 12px 28px rgba(0, 0, 0, 0.32),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+}
+
 /* ── 侧边导航激活指示 ── */
 .nav-active {
   position: relative;

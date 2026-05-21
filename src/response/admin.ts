@@ -35,7 +35,7 @@ export default async (e: EventsEnum, next: Next) => {
   }
 
   const [message] = useMessage(event);
-  const cmd = event.MessageText.replace(/^(!|！|\/|#|＃)(yz|云崽)\s*/, '').trim();
+  const cmd = event.MessageText.replace(/^(\/|#|＃)(yz|云崽)\s*/, '').trim();
   const isQQBot = e.Platform === 'qq-bot';
 
   /** 安全发送文本（QQ Bot 自动过滤 URL） */

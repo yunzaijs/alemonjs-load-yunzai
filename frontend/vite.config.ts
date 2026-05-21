@@ -1,6 +1,6 @@
-import { readFileSync } from 'fs';
 import theme from '@alemonjs/react-ui/theme.json';
 import react from '@vitejs/plugin-react';
+import { readFileSync } from 'fs';
 import { fileURLToPath, URL } from 'url';
 import { defineConfig } from 'vite';
 const NODE_ENV = process.env.NODE_ENV === 'development';
@@ -11,7 +11,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:17817/app/api/',
+        target: 'http://127.0.0.1:17187/app/api/',
         changeOrigin: true,
         rewrite: path => path.replace(/^\/api/, '')
       }

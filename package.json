@@ -12,7 +12,7 @@
   },
   "scripts": {
     "app": "node index.js",
-    "dev": "npx lvy app.ts",
+    "dev": "npx lvy app.ts --serverPort 17187",
     "view": "npx lvy app.ts --jsxp",
     "build": "lvy build",
     "lint": "eslint src --ext .ts,.tsx,.js --max-warnings=0",
@@ -23,13 +23,16 @@
     "precommit": "lint-staged"
   },
   "dependencies": {
+    "@koa/multer": "^4.0.0",
     "classnames": "^2.5.1",
+    "extract-zip": "^2.0.1",
     "isomorphic-git": "^1.37.4",
     "jsxp": "^1.4.0",
     "koa-bodyparser": "^4.4.1",
     "koa-router": "^14.0.0",
     "markdown-to-jsx": "^9.7.13",
-    "md5": "^2.3.0"
+    "md5": "^2.3.0",
+    "multer": "^2.0.2"
   },
   "devDependencies": {
     "@alemonjs/bubble": "^2.1.11",

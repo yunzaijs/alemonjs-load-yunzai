@@ -1,12 +1,14 @@
 import { HeaderDiv, SecondaryDiv, SidebarDiv } from '@alemonjs/react-ui';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import From from './From';
+import Logs from './Logs';
 import Manage from './Manage';
 import Plugin from './Plugin';
 import Repo from './Repo';
 
 const APP_VERSION = __APP_VERSION__;
+const THEME_STORAGE_KEY = 'alemonjs-load-yunzai:brand-theme';
 
 const CONFIG_SECTIONS = [
   { key: 'qq', label: '💬 QQ 账号', short: '💬 QQ' },
@@ -55,13 +57,35 @@ function Pill({ active, onClick, children, small }: { active: boolean; onClick: 
 export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [themeMode, setThemeMode] = useState<'light' | 'dark'>(() => {
+    if (typeof window === 'undefined') {
+      return 'light';
+    }
+
+    const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
+
+    if (saved === 'light' || saved === 'dark') {
+      return saved;
+    }
+
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
   const configMatch = location.pathname.match(/^\/config\/([^/]+)$/);
   const repoMatch = location.pathname.match(/^\/repo\/([^/]+)$/);
-  const activeKey = configMatch?.[1] ?? repoMatch?.[1] ?? (location.pathname === '/plugin' ? 'plugin' : 'manage');
+  const activeKey = configMatch?.[1] ?? repoMatch?.[1] ?? (location.pathname === '/plugin' ? 'plugin' : location.pathname === '/logs' ? 'logs' : 'manage');
   const isConfig = CONFIG_KEYS.has(activeKey);
   const isRepo = REPO_KEYS.has(activeKey);
   const go = (path: string) => {
     void navigate(path);
+  };
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', themeMode === 'dark');
+    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+  }, [themeMode]);
+
+  const toggleThemeMode = () => {
+    setThemeMode(prev => (prev === 'dark' ? 'light' : 'dark'));
   };
 
   return (
@@ -69,12 +93,14 @@ export default function AppLayout() {
       {/* ── PC 侧边栏 ── */}
       <SidebarDiv className='hidden lg:flex lg:flex-col w-44 shrink-0 px-2 py-3 overflow-y-auto' style={{ borderRight: '1px solid rgba(128,128,128,.08)' }}>
         <div className='flex items-center gap-2 px-3 py-2 mb-3'>
-          <div
-            className='w-7 h-7 rounded-lg flex items-center justify-center text-sm shadow-sm'
-            style={{ background: 'linear-gradient(135deg, #d5c8b2, #8f8c76)' }}
+          <button
+            type='button'
+            className='brand-badge w-7 h-7 rounded-lg flex items-center justify-center text-sm cursor-pointer transition-transform hover:scale-[1.04]'
+            onClick={toggleThemeMode}
+            title={`切换到${themeMode === 'dark' ? '浅色' : '深色'}主题`}
           >
             ⚡
-          </div>
+          </button>
           <div>
             <div className='text-[13px] font-bold gradient-text leading-tight'>Yunzai</div>
             <div className='flex items-center gap-1.5 text-[9px] opacity-30'>
@@ -89,6 +115,9 @@ export default function AppLayout() {
         </NavItem>
         <NavItem active={activeKey === 'plugin'} onClick={() => go('/plugin')}>
           🔌 插件
+        </NavItem>
+        <NavItem active={activeKey === 'logs'} onClick={() => go('/logs')}>
+          📜 日志
         </NavItem>
 
         <div className='text-[10px] uppercase tracking-wider opacity-25 font-medium px-3 pt-4 pb-1'>仓库配置</div>
@@ -111,12 +140,14 @@ export default function AppLayout() {
         {/* ── 移动端导航 ── */}
         <div className='lg:hidden'>
           <HeaderDiv className='px-3 py-2.5 flex items-center gap-2.5'>
-            <div
-              className='w-7 h-7 rounded-lg flex items-center justify-center text-sm shadow-sm'
-              style={{ background: 'linear-gradient(135deg, #d5c8b2, #8f8c76)' }}
+            <button
+              type='button'
+              className='brand-badge w-7 h-7 rounded-lg flex items-center justify-center text-sm cursor-pointer transition-transform active:scale-95'
+              onClick={toggleThemeMode}
+              title={`切换到${themeMode === 'dark' ? '浅色' : '深色'}主题`}
             >
               ⚡
-            </div>
+            </button>
             <div className='flex items-center gap-1.5 min-w-0'>
               <div className='text-[13px] font-bold gradient-text'>Yunzai</div>
               <div className='rounded-full px-1.5 py-0.5 text-[9px] border border-current/10 opacity-45 shrink-0'>{APP_VERSION}</div>
@@ -128,6 +159,9 @@ export default function AppLayout() {
             </Pill>
             <Pill active={activeKey === 'plugin'} onClick={() => go('/plugin')}>
               插件
+            </Pill>
+            <Pill active={activeKey === 'logs'} onClick={() => go('/logs')}>
+              日志
             </Pill>
             <Pill
               active={isRepo}
@@ -174,6 +208,7 @@ export default function AppLayout() {
         <div className='flex-1 px-3 py-2 sm:px-4 lg:px-6 lg:py-4'>
           {activeKey === 'manage' && <Manage />}
           {activeKey === 'plugin' && <Plugin />}
+          {activeKey === 'logs' && <Logs />}
           {isConfig && <From section={activeKey} />}
           {isRepo && <Repo section={activeKey} />}
         </div>

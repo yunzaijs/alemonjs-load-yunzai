@@ -11,7 +11,7 @@ export type API = {
    * @param callback
    * @returns
    */
-  onMessage: (callback: (data: any) => void) => void;
+  onMessage: (callback: (data: any) => void) => () => void;
   // 主题
   theme: {
     // 主题变量

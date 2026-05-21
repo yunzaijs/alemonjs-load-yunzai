@@ -1,15 +1,74 @@
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { getRepoData, getStatusData, getYunzaiFormData, runYunzaiAction, saveRepoData, saveYunzaiFormData } from './panel-service';
+import { getLogViewerData, getStatusData } from './panel-service';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export const activate = context => {
-  // Desktop 模式入口：
-  // 这里只负责在 AlemonJS Desktop/WebView 中注入页面与桌面消息总线。
-  // Web 模式下的浏览器访问走 src/api-router.ts 提供的 HTTP /api 接口。
+  // Desktop 子进程入口：
+  // - 当前文档层面仅将 desktop子进程 -> 机器人进程 的交互范围定义为“机器人状态”。
+  // - 若后续恢复/启用 src/bus/*，其职责也仅限 desktop子进程 -> 机器人进程 的状态桥接，不属于 Web 主链路。
+  // - Web 模式的浏览器访问始终走 src/api-router.ts 提供的 HTTP /api 接口。
   const webView = context.createSidebarWebView(context);
+  let statusSubscriberCount = 0;
+  let statusTimer: ReturnType<typeof setTimeout> | null = null;
+  let statusBusy = false;
+  const getStatusInterval = () => (statusBusy ? 500 : 2000);
+
+  const pushStatus = async () => {
+    const data = await getStatusData();
+
+    statusBusy = Boolean((data as { busy?: boolean }).busy);
+    webView.postMessage({
+      type: 'yunzai.status',
+      data
+    });
+  };
+
+  const scheduleStatusPush = () => {
+    if (statusSubscriberCount <= 0) {
+      statusTimer = null;
+
+      return;
+    }
+
+    statusTimer = setTimeout(() => {
+      void pushStatus()
+        .catch(console.error)
+        .finally(() => {
+          scheduleStatusPush();
+        });
+    }, getStatusInterval());
+  };
+
+  const ensureStatusPushLoop = () => {
+    if (statusSubscriberCount <= 0 || statusTimer) {
+      return;
+    }
+
+    void pushStatus()
+      .catch(console.error)
+      .finally(() => {
+        scheduleStatusPush();
+      });
+  };
+
+  const stopStatusPushLoop = () => {
+    if (statusSubscriberCount > 0 || !statusTimer) {
+      return;
+    }
+
+    clearTimeout(statusTimer);
+    statusTimer = null;
+  };
+
+  const postBoundaryMessage = (type: 'yunzai.result' | 'repo.result', message: string) => {
+    webView.postMessage({
+      type,
+      data: { message }
+    });
+  };
 
   context.onCommand('open.yunzai', () => {
     const htmlPath = join(__dirname, '../', 'dist', 'index.html');
@@ -28,35 +87,23 @@ export const activate = context => {
 
   webView.onMessage(async data => {
     try {
-      if (data.type === 'yunzai.form.save') {
-        saveYunzaiFormData(data.data ?? {});
-        context.notification('Yunzai 配置保存成功～');
-      } else if (data.type === 'yunzai.init') {
-        webView.postMessage({
-          type: 'yunzai.init',
-          data: getYunzaiFormData()
-        });
-      } else if (data.type === 'repo.init') {
-        webView.postMessage({
-          type: 'repo.init',
-          data: getRepoData()
-        });
-      } else if (data.type === 'repo.save') {
-        saveRepoData(data.data ?? {});
-        context.notification('仓库配置保存成功～');
+      if (data.type === 'yunzai.status.subscribe') {
+        statusSubscriberCount++;
+        ensureStatusPushLoop();
+      } else if (data.type === 'yunzai.status.unsubscribe') {
+        statusSubscriberCount = Math.max(0, statusSubscriberCount - 1);
+        stopStatusPushLoop();
       } else if (data.type === 'yunzai.status') {
+        await pushStatus();
+      } else if (data.type === 'yunzai.logs') {
         webView.postMessage({
-          type: 'yunzai.status',
-          data: await getStatusData()
+          type: 'yunzai.logs',
+          data: getLogViewerData(typeof data.data?.file === 'string' ? data.data.file : undefined, typeof data.data?.lines === 'number' ? data.data.lines : 400)
         });
-      } else if (data.type === 'yunzai.action') {
-        try {
-          const result = await runYunzaiAction(data.data ?? {});
-
-          webView.postMessage({ type: 'yunzai.result', data: result });
-        } catch (err: any) {
-          webView.postMessage({ type: 'yunzai.result', data: { message: `操作失败: ${err?.message ?? '未知错误'}` } });
-        }
+      } else if (data.type === 'yunzai.action' || data.type === 'yunzai.init' || data.type === 'yunzai.form.save') {
+        postBoundaryMessage('yunzai.result', '当前 desktop 链路仅支持机器人状态同步，不提供 Yunzai 控制或配置写入');
+      } else if (data.type === 'repo.init' || data.type === 'repo.save') {
+        postBoundaryMessage('repo.result', '当前 desktop 链路仅支持机器人状态同步，不提供仓库配置读写');
       }
     } catch (e) {
       console.error(e);

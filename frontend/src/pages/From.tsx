@@ -116,15 +116,15 @@ function SaveBtn({ saved }: { saved: boolean }) {
 /* ─── 主组件 ─── */
 
 export default function Form({ section }: { section: string }) {
+  const isDesktopRuntime = window.__ALEMONJS_RUNTIME_MODE__ === 'desktop';
   const [formData, setFormData] = useState<FormData>({ ...INITIAL });
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    if (!window.API) {
+    if (!window.API || isDesktopRuntime) {
       return;
     }
-    window.API.postMessage({ type: 'yunzai.init' });
-    window.API.onMessage(data => {
+    const dispose = window.API.onMessage(data => {
       if (data.type === 'yunzai.init') {
         const d = data.data ?? {};
         const arr2str = (v: unknown) => (Array.isArray(v) ? v.join(',') : String(v ?? ''));
@@ -170,7 +170,13 @@ export default function Form({ section }: { section: string }) {
         });
       }
     });
-  }, []);
+
+    window.API.postMessage({ type: 'yunzai.init' });
+
+    return () => {
+      dispose();
+    };
+  }, [isDesktopRuntime]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -187,10 +193,23 @@ export default function Form({ section }: { section: string }) {
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (isDesktopRuntime) {
+      return;
+    }
     window.API.postMessage({ type: 'yunzai.form.save', data: formData });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
+
+  if (isDesktopRuntime) {
+    return (
+      <div className='py-2'>
+        <PrimaryDiv className='rounded-xl px-4 py-3 text-[12px]' style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.16)' }}>
+          当前 desktop 链路仅同步机器人状态，不提供 Yunzai 配置读取或保存。
+        </PrimaryDiv>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={handleSubmit} className='py-2 space-y-3'>

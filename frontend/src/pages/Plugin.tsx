@@ -1,5 +1,6 @@
 import { Button, Collapse, HeaderDiv, Input, Modal, NotificationDiv, PrimaryDiv, SecondaryDiv, TagDiv } from '@alemonjs/react-ui';
 import { useEffect, useState } from 'react';
+import { uploadPluginArchive } from '../api/web-api';
 import { SmartDropdown } from './SmartDropdown';
 
 interface PluginItem {
@@ -80,6 +81,7 @@ interface PluginState {
 }
 
 const ONLINE_PLUGIN_CACHE_KEY = 'alemonjs-load-yunzai:online-plugins';
+const MAX_PLUGIN_ARCHIVE_SIZE_MB = 512;
 
 function readOnlinePluginCache(): OnlineCatalogItem[] {
   if (typeof window === 'undefined') {
@@ -171,6 +173,7 @@ function getRecommendedGroup(dirName: string): keyof typeof RECOMMENDED_GROUP_LA
 }
 
 export default function Plugin() {
+  const isDesktopRuntime = window.__ALEMONJS_RUNTIME_MODE__ === 'desktop';
   const cachedOnlineCatalog = readOnlinePluginCache();
   const [state, setState] = useState<PluginState>({
     installed: false,
@@ -182,9 +185,12 @@ export default function Plugin() {
   const [loading, setLoading] = useState('');
   const [message, setMessage] = useState('');
   const [customUrl, setCustomUrl] = useState('');
+  const [uploadDirName, setUploadDirName] = useState('');
+  const [archiveFile, setArchiveFile] = useState<File | null>(null);
   const [onlineKeyword, setOnlineKeyword] = useState('');
   const [pluginTab, setPluginTab] = useState<'required' | 'installed' | 'catalog' | 'online' | 'custom'>('required');
   const [confirmAction, setConfirmAction] = useState<{ action: string; label: string; extra?: Record<string, string> } | null>(null);
+  const [lastAction, setLastAction] = useState('');
 
   const showMessage = (msg: string) => {
     setMessage(msg);
@@ -214,22 +220,30 @@ export default function Plugin() {
           catalog: (d.catalog as CatalogItem[]) ?? [],
           onlineCatalog
         });
+        if (!(d.busy as boolean)) {
+          setLoading('');
+        }
       } else if (data.type === 'yunzai.result') {
-        setLoading('');
         showMessage((data.data as Record<string, string>)?.message ?? '操作完成');
-        window.API.postMessage({ type: 'yunzai.status' });
       }
     };
 
-    window.API.onMessage(handler);
-    window.API.postMessage({ type: 'yunzai.status' });
+    const dispose = window.API.onMessage(handler);
+
+    window.API.postMessage({ type: 'yunzai.status.subscribe' });
+
+    return () => {
+      window.API.postMessage({ type: 'yunzai.status.unsubscribe' });
+      dispose();
+    };
   }, []);
 
   const sendAction = (action: string, label: string, extra?: Record<string, string>) => {
-    if (loading) {
+    if (loading || isDesktopRuntime) {
       return;
     }
     setLoading(label);
+    setLastAction(action);
     window.API.postMessage({ type: 'yunzai.action', data: { action, ...extra } });
   };
 
@@ -255,7 +269,33 @@ export default function Plugin() {
     setCustomUrl('');
   };
 
-  const isDisabled = !!loading || state.busy;
+  const handleUploadArchive = async () => {
+    if (!archiveFile || isDesktopRuntime) {
+      return;
+    }
+    if (archiveFile.size > MAX_PLUGIN_ARCHIVE_SIZE_MB * 1024 * 1024) {
+      showMessage(`ZIP 文件过大，当前最大支持 ${MAX_PLUGIN_ARCHIVE_SIZE_MB}MB`);
+
+      return;
+    }
+
+    setLoading(`上传 ${archiveFile.name}`);
+    setLastAction('upload_plugin_zip');
+    try {
+      const json = await uploadPluginArchive(archiveFile, uploadDirName);
+
+      showMessage((json?.data as { message?: string } | undefined)?.message ?? json?.message ?? '插件上传完成');
+      setArchiveFile(null);
+      setUploadDirName('');
+      window.API.postMessage({ type: 'yunzai.status' });
+    } catch (err: any) {
+      showMessage(err?.message ?? '插件上传失败');
+      setLoading('');
+    }
+  };
+
+  const isDisabled = !!loading || state.busy || isDesktopRuntime;
+  const busyLabel = loading || (state.busy ? '处理中...' : '') || (lastAction ? `${lastAction}中...` : '处理中...');
   const requiredPlugin = state.catalog.find(item => item.dirName === 'miao-plugin') ?? null;
   const requiredInstalledPlugin = state.plugins.find(item => item.name === 'miao-plugin') ?? null;
 
@@ -317,6 +357,11 @@ export default function Plugin() {
 
   return (
     <div className='py-2 space-y-3'>
+      {isDesktopRuntime && (
+        <PrimaryDiv className='rounded-xl px-4 py-3 text-[12px]' style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.16)' }}>
+          当前 desktop 链路仅同步机器人状态，不提供插件安装、更新或卸载操作。
+        </PrimaryDiv>
+      )}
       {/* ── 通知 ── */}
       {message && <NotificationDiv className='rounded-xl px-4 py-3 text-sm animate-fade-in shadow-sm'>{message}</NotificationDiv>}
 
@@ -325,7 +370,7 @@ export default function Plugin() {
         <PrimaryDiv className='rounded-xl px-4 py-3.5 flex items-center justify-between animate-fade-in'>
           <div className='flex items-center gap-2.5'>
             <div className='w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin opacity-50' />
-            <span className='text-sm font-medium opacity-70'>{loading || '处理中...'}</span>
+            <span className='text-sm font-medium opacity-70'>{busyLabel}</span>
           </div>
         </PrimaryDiv>
       )}
@@ -703,27 +748,61 @@ export default function Plugin() {
 
       {/* ── 自定义安装 ── */}
       {pluginTab === 'custom' && (
-        <SecondaryDiv className='rounded-xl overflow-hidden'>
-          <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>
-            <span className='text-sm font-semibold'>🔗 通过 URL 安装</span>
-          </HeaderDiv>
-          <PrimaryDiv className='px-4 py-3'>
-            <div className='text-[11px] opacity-40 mb-2'>输入 Git 仓库地址安装第三方插件</div>
-            <div className='flex gap-2'>
+        <div className='space-y-3'>
+          <SecondaryDiv className='rounded-xl overflow-hidden'>
+            <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>
+              <span className='text-sm font-semibold'>🔗 通过 URL 安装</span>
+            </HeaderDiv>
+            <PrimaryDiv className='px-4 py-3'>
+              <div className='text-[11px] opacity-40 mb-2'>输入 Git 仓库地址安装第三方插件</div>
+              <div className='flex gap-2'>
+                <Input
+                  type='text'
+                  value={customUrl}
+                  onChange={e => setCustomUrl(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleInstallUrl()}
+                  placeholder='https://github.com/xxx/xxx-plugin.git'
+                  className='flex-1 px-3 py-1.5 text-sm rounded-xl'
+                />
+                <Button className='px-4 py-1.5 rounded-xl text-sm font-medium' onClick={handleInstallUrl} disabled={isDisabled || !customUrl.trim()}>
+                  安装
+                </Button>
+              </div>
+            </PrimaryDiv>
+          </SecondaryDiv>
+
+          <SecondaryDiv className='rounded-xl overflow-hidden'>
+            <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>
+              <span className='text-sm font-semibold'>📦 上传 ZIP 安装</span>
+            </HeaderDiv>
+            <PrimaryDiv className='px-4 py-3 space-y-2.5'>
+              <div className='text-[11px] opacity-40'>上传 ZIP 插件包并自动解压到 `plugins/`</div>
+              <input
+                type='file'
+                accept='.zip,application/zip'
+                onChange={e => {
+                  const file = e.target.files?.[0] ?? null;
+
+                  setArchiveFile(file);
+                }}
+                className='block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:px-3 file:py-2 file:text-sm file:font-medium'
+              />
               <Input
                 type='text'
-                value={customUrl}
-                onChange={e => setCustomUrl(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleInstallUrl()}
-                placeholder='https://github.com/xxx/xxx-plugin.git'
-                className='flex-1 px-3 py-1.5 text-sm rounded-xl'
+                value={uploadDirName}
+                onChange={e => setUploadDirName(e.target.value)}
+                placeholder='可选：指定插件目录名'
+                className='w-full px-3 py-1.5 text-sm rounded-xl'
               />
-              <Button className='px-4 py-1.5 rounded-xl text-sm font-medium' onClick={handleInstallUrl} disabled={isDisabled || !customUrl.trim()}>
-                安装
+              <div className='text-[10px] opacity-30'>
+                如果不填写目录名，将优先使用压缩包内顶层目录名，其次使用 ZIP 文件名。当前最大支持 {MAX_PLUGIN_ARCHIVE_SIZE_MB}MB。
+              </div>
+              <Button className='px-4 py-1.5 rounded-xl text-sm font-medium' onClick={() => void handleUploadArchive()} disabled={isDisabled || !archiveFile}>
+                上传并安装
               </Button>
-            </div>
-          </PrimaryDiv>
-        </SecondaryDiv>
+            </PrimaryDiv>
+          </SecondaryDiv>
+        </div>
       )}
 
       {/* ── 确认弹窗 ── */}

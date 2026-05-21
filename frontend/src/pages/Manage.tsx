@@ -1,6 +1,5 @@
-import { Button, Collapse, Modal, NotificationDiv, PrimaryDiv, TagDiv } from '@alemonjs/react-ui';
+import { Button, Modal, NotificationDiv, PrimaryDiv, TagDiv, Tooltip } from '@alemonjs/react-ui';
 import { useEffect, useState } from 'react';
-import { SmartDropdown } from './SmartDropdown';
 
 type ColorKey = 'green' | 'blue' | 'orange' | 'red';
 
@@ -37,7 +36,58 @@ interface ManagerState {
   logCount: number;
 }
 
+function getStatusTagLabel(state: Pick<ManagerState, 'installed' | 'running' | 'busy' | 'busyTask'>): string {
+  if (!state.installed) {
+    return '未安装';
+  }
+  if (state.busy) {
+    if (state.busyTask.includes('启动')) {
+      return '启动中';
+    }
+    if (state.busyTask.includes('停止')) {
+      return '停止中';
+    }
+
+    return '处理中';
+  }
+
+  return state.running ? '运行中' : '已停止';
+}
+
+function ActionButton({
+  disabled,
+  reason,
+  children,
+  className,
+  onClick,
+  style
+}: {
+  disabled: boolean;
+  reason?: string;
+  children: React.ReactNode;
+  className?: string;
+  onClick: () => void;
+  style?: React.CSSProperties;
+}) {
+  const button = (
+    <Button className={className} disabled={disabled} onClick={onClick} style={style}>
+      {children}
+    </Button>
+  );
+
+  if (!disabled || !reason) {
+    return button;
+  }
+
+  return (
+    <Tooltip text={reason} position='top'>
+      <span className='block w-full'>{button}</span>
+    </Tooltip>
+  );
+}
+
 export default function Manage() {
+  const isDesktopRuntime = window.__ALEMONJS_RUNTIME_MODE__ === 'desktop';
   const [state, setState] = useState<ManagerState>({
     status: '获取中...',
     installed: false,
@@ -50,6 +100,7 @@ export default function Manage() {
   const [message, setMessage] = useState('');
   const [helpData, setHelpData] = useState<HelpData | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ action: string; label: string; extra?: Record<string, string> } | null>(null);
+  const [lastAction, setLastAction] = useState('');
 
   const showMessage = (msg: string) => {
     setMessage(msg);
@@ -69,22 +120,30 @@ export default function Manage() {
         if (d.help) {
           setHelpData(d.help);
         }
+        if (!d.busy) {
+          setLoading('');
+        }
       } else if (data.type === 'yunzai.result') {
-        setLoading('');
         showMessage((data.data as Record<string, string>)?.message ?? '操作完成');
-        window.API.postMessage({ type: 'yunzai.status' });
       }
     };
 
-    window.API.onMessage(handler);
-    window.API.postMessage({ type: 'yunzai.status' });
+    const dispose = window.API.onMessage(handler);
+
+    window.API.postMessage({ type: 'yunzai.status.subscribe' });
+
+    return () => {
+      window.API.postMessage({ type: 'yunzai.status.unsubscribe' });
+      dispose();
+    };
   }, []);
 
   const sendAction = (action: string, label: string, extra?: Record<string, string>) => {
-    if (loading) {
+    if (loading || isDesktopRuntime) {
       return;
     }
     setLoading(label);
+    setLastAction(action);
     window.API.postMessage({ type: 'yunzai.action', data: { action, ...extra } });
   };
 
@@ -100,10 +159,46 @@ export default function Manage() {
     setConfirmAction(null);
   };
 
-  const isDisabled = !!loading || state.busy;
+  const statusTagLabel = getStatusTagLabel(state);
+  const canInstall = !state.installed && !state.busy && !loading && !isDesktopRuntime;
+  const canStart = state.installed && !state.running && !state.busy && !loading && !isDesktopRuntime;
+  const canStop = state.installed && state.running && !state.busy && !loading && !isDesktopRuntime;
+  const canRestart = state.installed && !state.busy && !loading && !isDesktopRuntime;
+  const canUpdate = state.installed && !state.busy && !loading && !isDesktopRuntime;
+  const canForceUpdate = state.installed && !state.busy && !loading && !isDesktopRuntime;
+  const canInstallDeps = state.installed && !state.busy && !loading && !isDesktopRuntime;
+  const canUninstall = state.installed && !state.busy && !loading && !isDesktopRuntime;
+  const busyLabel = loading || state.busyTask || (lastAction ? `${lastAction}中...` : '处理中...');
+  const getDisabledReason = (action: 'install' | 'start' | 'stop' | 'restart' | 'update' | 'force_update' | 'install_deps' | 'uninstall') => {
+    if (isDesktopRuntime) {
+      return 'Desktop 模式仅展示状态，不提供此操作';
+    }
+    if (loading || state.busy) {
+      return busyLabel;
+    }
+    if (action === 'install' && state.installed) {
+      return 'Yunzai 已安装';
+    }
+    if (action !== 'install' && !state.installed) {
+      return '请先安装 Yunzai';
+    }
+    if (action === 'start' && state.running) {
+      return '机器人已在运行';
+    }
+    if (action === 'stop' && !state.running) {
+      return '机器人当前未运行';
+    }
+
+    return '当前状态下不可操作';
+  };
 
   return (
     <div className='py-2 space-y-3'>
+      {isDesktopRuntime && (
+        <PrimaryDiv className='rounded-xl px-4 py-3 text-[12px]' style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.16)' }}>
+          当前 desktop 链路仅同步机器人状态，不提供 Yunzai 启动、停止、重启或维护操作。
+        </PrimaryDiv>
+      )}
       {/* ── 通知 ── */}
       {message && <NotificationDiv className='rounded-xl px-4 py-3 text-sm animate-fade-in shadow-sm'>{message}</NotificationDiv>}
 
@@ -112,9 +207,9 @@ export default function Manage() {
         <PrimaryDiv className='rounded-xl px-4 py-3.5 flex items-center justify-between animate-fade-in'>
           <div className='flex items-center gap-2.5'>
             <div className='w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin opacity-50' />
-            <span className='text-sm font-medium opacity-70'>{loading || state.busyTask}</span>
+            <span className='text-sm font-medium opacity-70'>{busyLabel}</span>
           </div>
-          {state.busy && (
+          {state.busy && !isDesktopRuntime && (
             <Button className='px-3 py-1 text-xs rounded-lg' onClick={() => sendAction('cancel', '取消')}>
               取消
             </Button>
@@ -123,8 +218,8 @@ export default function Manage() {
       )}
 
       {/* ── 状态卡片 + 操作 ── */}
-      <div className={`space-y-3 ${state.installed ? 'xl:flex xl:gap-4 xl:space-y-0 xl:items-start' : ''}`}>
-        <PrimaryDiv className='rounded-xl p-4 card-hover xl:flex-1'>
+      <div className='space-y-3'>
+        <PrimaryDiv className='rounded-xl p-4 card-hover'>
           <div className='flex items-center justify-between'>
             <div className='flex items-center gap-3'>
               <div
@@ -147,103 +242,136 @@ export default function Manage() {
                 <div className='text-[11px] opacity-40 mt-0.5'>{state.status}</div>
               </div>
             </div>
-            <TagDiv className='px-3 py-1 rounded-full text-xs font-medium'>{state.running ? '运行中' : state.installed ? '已停止' : '未安装'}</TagDiv>
+            <TagDiv className='px-3 py-1 rounded-full text-xs font-medium'>{statusTagLabel}</TagDiv>
           </div>
-        </PrimaryDiv>
 
-        {state.installed && (
-          <div className='grid grid-cols-2 gap-2.5 xl:flex xl:flex-col xl:gap-2 xl:min-w-[180px]'>
-            <SmartDropdown
-              buttons={[
-                { children: '更新', onClick: () => sendAction('update', '更新'), disabled: isDisabled },
-                { children: '强制更新', onClick: () => sendAction('force_update', '强制更新'), disabled: isDisabled },
-                { children: '重装依赖', onClick: () => sendAction('install_deps', '安装依赖'), disabled: isDisabled }
-              ]}
-            >
-              <Button className='w-full py-2.5 rounded-xl text-sm font-medium' disabled={isDisabled}>
-                更新 ▾
-              </Button>
-            </SmartDropdown>
-            <SmartDropdown
-              buttons={[
-                {
-                  children: `清理日志${state.logCount > 0 ? ` (${state.logCount})` : ''}`,
-                  onClick: () => sendAction('clean_logs', '清理日志'),
-                  disabled: isDisabled
-                },
-                { children: '卸载 Yunzai', onClick: () => dangerAction('uninstall', '卸载 Yunzai'), disabled: isDisabled, className: 'text-red-400' }
-              ]}
-            >
-              <Button className='w-full py-2.5 rounded-xl text-sm font-medium' disabled={isDisabled}>
-                维护 ▾
-              </Button>
-            </SmartDropdown>
-          </div>
-        )}
+          {state.installed && (
+            <div className='mt-4 grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5'>
+              {!isDesktopRuntime && (
+                <>
+                  {!state.running ? (
+                    <>
+                      <ActionButton
+                        className='w-full py-2.5 rounded-xl text-sm font-medium'
+                        disabled={!canStart}
+                        reason={!canStart ? getDisabledReason('start') : undefined}
+                        onClick={() => sendAction('start', '启动')}
+                      >
+                        启动
+                      </ActionButton>
+                      <ActionButton
+                        className='w-full py-2.5 rounded-xl text-sm font-medium bg-red-500/10 hover:bg-red-500/20 text-red-400'
+                        disabled={!canUninstall}
+                        reason={!canUninstall ? getDisabledReason('uninstall') : undefined}
+                        onClick={() => dangerAction('uninstall', '卸载 Yunzai')}
+                      >
+                        卸载 Yunzai
+                      </ActionButton>
+                      <ActionButton
+                        className='w-full py-2.5 rounded-xl text-sm font-medium'
+                        disabled={!canUpdate}
+                        reason={!canUpdate ? getDisabledReason('update') : undefined}
+                        onClick={() => sendAction('update', '更新')}
+                      >
+                        更新
+                      </ActionButton>
+                      <ActionButton
+                        className='w-full py-2.5 rounded-xl text-sm font-medium'
+                        disabled={!canForceUpdate}
+                        reason={!canForceUpdate ? getDisabledReason('force_update') : undefined}
+                        onClick={() => sendAction('force_update', '强制更新')}
+                      >
+                        强制更新
+                      </ActionButton>
+                      <ActionButton
+                        className='w-full py-2.5 rounded-xl text-sm font-medium'
+                        disabled={!canInstallDeps}
+                        reason={!canInstallDeps ? getDisabledReason('install_deps') : undefined}
+                        onClick={() => sendAction('install_deps', '安装依赖')}
+                      >
+                        重装依赖
+                      </ActionButton>
+                    </>
+                  ) : (
+                    <>
+                      <ActionButton
+                        className='w-full py-2.5 rounded-xl text-sm font-medium'
+                        disabled={!canStop}
+                        reason={!canStop ? getDisabledReason('stop') : undefined}
+                        onClick={() => sendAction('stop', '停止')}
+                      >
+                        停止
+                      </ActionButton>
+                      <ActionButton
+                        className='w-full py-2.5 rounded-xl text-sm font-medium'
+                        disabled={!canRestart}
+                        reason={!canRestart ? getDisabledReason('restart') : undefined}
+                        onClick={() => sendAction('restart', '重启')}
+                      >
+                        重启
+                      </ActionButton>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </PrimaryDiv>
       </div>
 
       {/* ── 操作区 ── */}
-      {!state.installed && (
-        <Button
+      {!state.installed && !isDesktopRuntime && (
+        <ActionButton
           className='w-full py-3.5 rounded-xl text-sm font-semibold shadow-sm'
           onClick={() => sendAction('install', '安装 Yunzai')}
-          disabled={isDisabled}
+          disabled={!canInstall}
+          reason={!canInstall ? getDisabledReason('install') : undefined}
           style={{ background: 'linear-gradient(135deg, #d5c8b2 0%, #8f8c76 100%)' }}
         >
           安装 Yunzai
-        </Button>
+        </ActionButton>
       )}
 
       {/* ── 帮助 ── */}
       {helpData && (
-        <Collapse
-          items={[
-            {
-              key: 'help',
-              label: '📖 管理帮助 · 指令参考',
-              children: (
-                <PrimaryDiv className='rounded-b-xl px-4 py-3 space-y-3'>
-                  {/* 安装流程 */}
-                  <div>
-                    <div className='text-[12px] font-semibold opacity-60 mb-2'>首次安装流程</div>
-                    <div className='grid grid-cols-4 gap-2'>
-                      {helpData.installFlow.map(s => (
-                        <div key={s.step} className='rounded-lg p-2 text-center' style={{ background: 'rgba(128,128,128,.05)' }}>
-                          <div className='text-base font-bold opacity-40 mb-1'>{s.step}</div>
-                          <div className='text-[11px] font-semibold opacity-70'>{s.label}</div>
-                          <div className='text-[10px] font-mono opacity-50 mt-0.5'>{s.cmd}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className='text-[10px] opacity-30 mt-1.5 text-center'>步骤②可重复执行安装多个插件</div>
-                  </div>
+        <PrimaryDiv className='rounded-b-xl px-4 py-3 space-y-3'>
+          {/* 安装流程 */}
+          <div>
+            <div className='text-[12px] font-semibold opacity-60 mb-2'>首次安装流程</div>
+            <div className='grid grid-cols-4 gap-2'>
+              {helpData.installFlow.map(s => (
+                <div key={s.step} className='rounded-lg p-2 text-center' style={{ background: 'rgba(128,128,128,.05)' }}>
+                  <div className='text-base font-bold opacity-40 mb-1'>{s.step}</div>
+                  <div className='text-[11px] font-semibold opacity-70'>{s.label}</div>
+                  <div className='text-[10px] font-mono opacity-50 mt-0.5'>{s.cmd}</div>
+                </div>
+              ))}
+            </div>
+            <div className='text-[10px] opacity-30 mt-1.5 text-center'>步骤②可重复执行安装多个插件</div>
+          </div>
 
-                  {/* 进程控制 + 工具指令 */}
-                  <div className='grid grid-cols-1 lg:grid-cols-2 gap-3'>
-                    <div>
-                      <div className='text-[12px] font-semibold opacity-60 mb-2'>进程控制</div>
-                      <div className='flex flex-col gap-1.5'>
-                        {helpData.controls.map(c => (
-                          <CmdRow key={c.cmd} {...c} />
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <div className='text-[12px] font-semibold opacity-60 mb-2'>工具指令</div>
-                      <div className='flex flex-col gap-1.5'>
-                        {helpData.tools.map(t => (
-                          <CmdRow key={t.cmd} {...t} />
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+          {/* 进程控制 + 工具指令 */}
+          <div className='grid grid-cols-1 lg:grid-cols-2 gap-3'>
+            <div>
+              <div className='text-[12px] font-semibold opacity-60 mb-2'>进程控制</div>
+              <div className='flex flex-col gap-1.5'>
+                {helpData.controls.map(c => (
+                  <CmdRow key={c.cmd} {...c} />
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className='text-[12px] font-semibold opacity-60 mb-2'>工具指令</div>
+              <div className='flex flex-col gap-1.5'>
+                {helpData.tools.map(t => (
+                  <CmdRow key={t.cmd} {...t} />
+                ))}
+              </div>
+            </div>
+          </div>
 
-                  <div className='text-[10px] opacity-30 text-center'>💡 前缀支持 # ! / · 可用 #yz 或 #云崽</div>
-                </PrimaryDiv>
-              )
-            }
-          ]}
-        />
+          <div className='text-[10px] opacity-30 text-center'>💡 前缀支持 # ! / · 可用 #yz 或 #云崽</div>
+        </PrimaryDiv>
       )}
 
       {/* ── 确认弹窗 ── */}

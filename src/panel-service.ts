@@ -1,17 +1,11 @@
 import { getConfig, getConfigValue } from 'alemonjs';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import YAML from 'yaml';
-import { getAllPlugins, getGhProxy, getPluginInfo, getYunzaiDir } from './path';
-import { manager } from './yunzai/manager';
+import { getGhProxy, getYunzaiDir } from './path';
+import { executeYunzaiActionLocal, getStatusSnapshotLocal, installPluginArchiveLocal } from './yunzai/control';
 
 type PrimitiveRecord = Record<string, unknown>;
-
-export interface PluginItem {
-  name: string;
-  installed: boolean;
-  isGit: boolean;
-}
 
 export interface CatalogItem {
   dirName: string;
@@ -29,6 +23,20 @@ export interface OnlineCatalogItem {
   description: string;
   category: string;
   installed: boolean;
+}
+
+export interface LogFileItem {
+  name: string;
+  size: number;
+  updatedAt: number;
+}
+
+export interface LogViewerData {
+  files: LogFileItem[];
+  activeFile: string;
+  content: string;
+  truncated: boolean;
+  updatedAt: number;
 }
 
 type OnlineIndexCache = {
@@ -165,7 +173,7 @@ export async function getOnlineCatalogData(forceRefresh = false): Promise<Online
   }
 
   onlineIndexCache.pending = (async () => {
-    const installedPlugins = manager.isInstalled ? getInstalledPlugins() : [];
+    const installedPlugins = getStatusSnapshotLocal().plugins;
     const installedSet = new Set(installedPlugins.map(p => p.name));
     const data = (await fetchOnlineCatalog()).map(item => ({
       ...item,
@@ -185,34 +193,56 @@ export async function getOnlineCatalogData(forceRefresh = false): Promise<Online
   }
 }
 
-function getInstalledPlugins(): PluginItem[] {
-  const pluginsDir = join(getYunzaiDir(), 'plugins');
-
-  if (!existsSync(pluginsDir)) {
-    return [];
-  }
-
-  return readdirSync(pluginsDir, { withFileTypes: true })
-    .filter(d => d.isDirectory())
-    .map(d => {
-      const pluginDir = join(pluginsDir, d.name);
-
-      return {
-        name: d.name,
-        installed: true,
-        isGit: existsSync(join(pluginDir, '.git'))
-      };
-    });
-}
-
-function getLogCount(): number {
+export function getLogViewerData(fileName?: string, maxLines = 400): LogViewerData {
   const logsDir = join(getYunzaiDir(), 'logs');
 
   if (!existsSync(logsDir)) {
-    return 0;
+    return {
+      files: [],
+      activeFile: '',
+      content: '',
+      truncated: false,
+      updatedAt: Date.now()
+    };
   }
 
-  return readdirSync(logsDir).filter(f => f.endsWith('.log')).length;
+  const files = readdirSync(logsDir)
+    .filter(file => file.endsWith('.log'))
+    .map(file => {
+      const fullPath = join(logsDir, file);
+      const stat = statSync(fullPath);
+
+      return {
+        name: file,
+        size: stat.size,
+        updatedAt: stat.mtimeMs
+      };
+    })
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+
+  const activeFile = fileName && files.some(file => file.name === fileName) ? fileName : (files[0]?.name ?? '');
+
+  if (!activeFile) {
+    return {
+      files,
+      activeFile: '',
+      content: '',
+      truncated: false,
+      updatedAt: Date.now()
+    };
+  }
+
+  const raw = readFileSync(join(logsDir, activeFile), 'utf-8').replace(/\r\n/g, '\n');
+  const lines = raw.split('\n');
+  const truncated = lines.length > maxLines;
+
+  return {
+    files,
+    activeFile,
+    content: truncated ? lines.slice(-maxLines).join('\n') : raw,
+    truncated,
+    updatedAt: Date.now()
+  };
 }
 
 function getConfigDir(): string {
@@ -443,30 +473,14 @@ export function saveRepoData(db: PrimitiveRecord) {
 }
 
 export async function getStatusData() {
-  const installedPlugins = manager.isInstalled ? getInstalledPlugins() : [];
-  const installedSet = new Set(installedPlugins.map(p => p.name));
-  const catalog: CatalogItem[] = getAllPlugins().map(p => ({
-    dirName: p.dirName,
-    label: p.label,
-    aliases: p.aliases,
-    repoUrl: p.repoUrl,
-    installed: installedSet.has(p.dirName)
-  }));
   const onlineCatalog = await getOnlineCatalogData().catch(() => []);
 
   return {
-    status: manager.getStatus(),
-    installed: manager.isInstalled,
-    running: manager.isRunning,
-    busy: manager.isBusy,
-    busyTask: manager.busyTaskName,
-    plugins: installedPlugins,
-    catalog,
+    ...getStatusSnapshotLocal(),
     onlineCatalog,
-    logCount: manager.isInstalled ? getLogCount() : 0,
     help: {
       installFlow: [
-        { step: '①', label: '安装框架', cmd: '#yz安装', desc: '克隆 Yunzai 仓库' },
+        { step: '①', label: '安装Yunzai', cmd: '#yz安装', desc: '克隆 Yunzai 仓库' },
         { step: '②', label: '安装插件', cmd: '#yz安装插件miao', desc: '按需安装游戏插件' },
         { step: '③', label: '安装依赖', cmd: '#yz安装依赖', desc: '统一安装所有依赖' },
         { step: '④', label: '启动', cmd: '#yz启动', desc: '启动 Worker 进程' }
@@ -497,129 +511,10 @@ export async function getStatusData() {
   };
 }
 
-export async function runYunzaiAction(data: PrimitiveRecord) {
-  const action = String(data.action ?? '');
-  const plugin = typeof data.plugin === 'string' ? data.plugin : '';
+export function runYunzaiAction(data: PrimitiveRecord) {
+  return executeYunzaiActionLocal(data);
+}
 
-  switch (action) {
-    case 'install':
-      await manager.install();
-
-      return { message: 'Yunzai 安装完成' };
-    case 'uninstall':
-      await manager.uninstall();
-
-      return { message: 'Yunzai 已卸载' };
-    case 'start':
-      await manager.start();
-
-      return { message: 'Yunzai 已启动' };
-    case 'stop':
-      await manager.stop();
-
-      return { message: 'Yunzai 已停止' };
-    case 'restart':
-      await manager.restart();
-
-      return { message: 'Yunzai 已重启' };
-    case 'update':
-      await manager.updateAll();
-
-      return { message: 'Yunzai 更新完成' };
-    case 'force_update':
-      await manager.updateAll(true);
-
-      return { message: 'Yunzai 强制更新完成' };
-    case 'install_deps':
-      await manager.installDeps();
-
-      return { message: '依赖安装完成' };
-    case 'cancel':
-      if (manager.isBusy) {
-        const taskName = manager.busyTaskName;
-
-        manager.cancelTask();
-
-        return { message: `已取消: ${taskName}` };
-      }
-
-      return { message: '当前没有正在执行的任务' };
-    case 'clean_logs': {
-      const logsDir = join(getYunzaiDir(), 'logs');
-
-      if (!existsSync(logsDir)) {
-        return { message: '日志目录不存在' };
-      }
-
-      const files = readdirSync(logsDir).filter(f => f.endsWith('.log'));
-
-      for (const file of files) {
-        rmSync(join(logsDir, file), { force: true });
-      }
-
-      return { message: `已清理 ${files.length} 个日志文件` };
-    }
-    case 'install_plugin': {
-      if (!plugin) {
-        return { message: '请输入插件别名或仓库地址' };
-      }
-
-      const info = getPluginInfo(plugin);
-
-      if (info) {
-        await manager.installPlugin(info);
-
-        return { message: `${info.label} 安装完成` };
-      }
-
-      if (/^(https?:\/\/|git@)/.test(plugin)) {
-        const dirName =
-          plugin
-            .replace(/\.git$/, '')
-            .split('/')
-            .pop() ?? 'unknown-plugin';
-
-        await manager.installPlugin({ dirName, repoUrl: plugin, label: dirName });
-
-        return { message: `${dirName} 安装完成` };
-      }
-
-      return { message: `未知插件「${plugin}」，请使用别名或完整仓库地址` };
-    }
-    case 'update_plugin': {
-      if (!plugin) {
-        return { message: '缺少插件参数' };
-      }
-
-      const info = getPluginInfo(plugin) ?? { dirName: plugin, repoUrl: '', label: plugin };
-
-      await manager.updatePlugin(info);
-
-      return { message: `${info.label} 更新完成` };
-    }
-    case 'force_update_plugin': {
-      if (!plugin) {
-        return { message: '缺少插件参数' };
-      }
-
-      const info = getPluginInfo(plugin) ?? { dirName: plugin, repoUrl: '', label: plugin };
-
-      await manager.updatePlugin(info, true);
-
-      return { message: `${info.label} 强制更新完成` };
-    }
-    case 'uninstall_plugin': {
-      if (!plugin) {
-        return { message: '缺少插件参数' };
-      }
-
-      const info = getPluginInfo(plugin) ?? { dirName: plugin, repoUrl: '', label: plugin };
-
-      manager.uninstallPlugin(info);
-
-      return { message: `${info.label} 已卸载` };
-    }
-    default:
-      return { message: `未知操作: ${action}` };
-  }
+export function uploadYunzaiPluginArchive(filePath: string, options?: { dirName?: string; originalName?: string }) {
+  return installPluginArchiveLocal(filePath, options);
 }

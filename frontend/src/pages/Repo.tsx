@@ -62,6 +62,7 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
 }
 
 export default function Repo({ section }: { section: string }) {
+  const isDesktopRuntime = window.__ALEMONJS_RUNTIME_MODE__ === 'desktop';
   const [formData, setFormData] = useState<RepoData>({ ...INITIAL });
   const [plugins, setPlugins] = useState<PluginEntry[]>([]);
   const [saved, setSaved] = useState(false);
@@ -69,7 +70,7 @@ export default function Repo({ section }: { section: string }) {
   const [repoTab, setRepoTab] = useState<'yunzai' | 'miao'>('yunzai');
 
   useEffect(() => {
-    if (!window.API) {
+    if (!window.API || isDesktopRuntime) {
       return;
     }
     const handler = data => {
@@ -107,9 +108,14 @@ export default function Repo({ section }: { section: string }) {
       }
     };
 
+    const dispose = window.API.onMessage(handler);
+
     window.API.postMessage({ type: 'repo.init' });
-    window.API.onMessage(handler);
-  }, []);
+
+    return () => {
+      dispose();
+    };
+  }, [isDesktopRuntime]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -117,6 +123,12 @@ export default function Repo({ section }: { section: string }) {
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    if (isDesktopRuntime) {
+      setMessage('当前 desktop 链路仅支持机器人状态同步，不提供仓库配置读写');
+
+      return;
+    }
 
     // 把 plugins 数组转成 key→object 结构
     const pluginsObj: Record<string, any> = {};
@@ -143,6 +155,16 @@ export default function Repo({ section }: { section: string }) {
     setTimeout(() => setSaved(false), 2000);
   };
 
+  if (isDesktopRuntime) {
+    return (
+      <div className='py-2'>
+        <PrimaryDiv className='rounded-xl px-4 py-3 text-[12px]' style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.16)' }}>
+          当前 desktop 链路仅同步机器人状态，不提供仓库配置读取或保存。
+        </PrimaryDiv>
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={handleSubmit} className='py-2 space-y-3'>
       {message && <PrimaryDiv className='rounded-xl px-4 py-3 text-sm animate-fade-in shadow-sm'>{message}</PrimaryDiv>}
@@ -156,20 +178,20 @@ export default function Repo({ section }: { section: string }) {
             <SaveBtn saved={saved} />
           </HeaderDiv>
           <PrimaryDiv className='px-4 py-0.5 divide-y divide-gray-200/10'>
-            <Row label='Master Key' tip='AlemonJS 主人密钥，逗号分隔多个'>
-              <Input
-                name='master_key'
-                value={formData.master_key}
-                placeholder='key1,key2'
-                onChange={handleChange}
-                className='w-full px-3 py-1.5 text-sm rounded-lg'
-              />
-            </Row>
             <Row label='主人 ID' tip='AlemonJS 主人 ID，逗号分隔多个'>
               <Input
                 name='master_id'
                 value={formData.master_id}
                 placeholder='id1,id2'
+                onChange={handleChange}
+                className='w-full px-3 py-1.5 text-sm rounded-lg'
+              />
+            </Row>
+            <Row label='主人 Key' tip='AlemonJS 主人密钥，逗号分隔多个'>
+              <Input
+                name='master_key'
+                value={formData.master_key}
+                placeholder='key1,key2'
                 onChange={handleChange}
                 className='w-full px-3 py-1.5 text-sm rounded-lg'
               />

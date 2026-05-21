@@ -5,25 +5,25 @@ import { manager } from './yunzai';
 const responseRouter = defineRouter([
   // 帮助指令优先（更具体的正则先匹配）
   {
-    regular: /^(!|！|\/|#|＃)(yz|云崽)(help|帮助)$/,
+    regular: /^(\/|#|＃)(yz|云崽)(help|帮助)$/,
     selects: ['message.create', 'private.message.create'],
     handler: lazy(() => import('./response/help'))
   },
   // 插件帮助
   {
-    regular: /^(!|！|\/|#|＃)(yz|云崽)(插件帮助|插件列表)$/,
+    regular: /^(\/|#|＃)(yz|云崽)(插件帮助|插件列表)$/,
     selects: ['message.create', 'private.message.create'],
     handler: lazy(() => import('./response/pluginHelp'))
   },
   // 插件说明
   {
-    regular: /^(!|！|\/|#|＃)(yz|云崽)插件说明/,
+    regular: /^(\/|#|＃)(yz|云崽)插件说明/,
     selects: ['message.create', 'private.message.create'],
     handler: lazy(() => import('./response/pluginReadme'))
   },
   // 管理指令
   {
-    regular: /^(!|！|\/|#|＃)(yz|云崽)/,
+    regular: /^(\/|#|＃)(yz|云崽)/,
     selects: ['message.create', 'private.message.create'],
     handler: lazy(() => import('./response/admin'))
   },

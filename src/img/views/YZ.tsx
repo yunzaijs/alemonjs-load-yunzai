@@ -6,7 +6,7 @@ import HTML from './HTML.js';
 // ─── 数据 ───
 
 const INSTALL_FLOW = [
-  { step: '①', label: '安装框架', cmd: '#yz安装', desc: '克隆 Yunzai 仓库' },
+  { step: '①', label: '安装Yunzai', cmd: '#yz安装', desc: '克隆 Yunzai 仓库' },
   { step: '②', label: '安装插件', cmd: '#yz安装插件miao', desc: '按需安装游戏插件' },
   { step: '③', label: '安装依赖', cmd: '#yz安装依赖', desc: '统一安装所有依赖' },
   { step: '④', label: '启动', cmd: '#yz启动', desc: '启动 Worker 进程' }
