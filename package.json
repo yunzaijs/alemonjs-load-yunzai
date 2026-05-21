@@ -92,9 +92,9 @@
     "registry": "https://registry.npmjs.org",
     "access": "public"
   },
-  "bugs": "https://github.com/xiuxianjs/alemonjs-load-yunzai/issues",
+  "bugs": "https://github.com/yunzaijs/alemonjs-load-yunzai/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/xiuxianjs/alemonjs-load-yunzai.git"
+    "url": "https://github.com/yunzaijs/alemonjs-load-yunzai.git"
   }
 }

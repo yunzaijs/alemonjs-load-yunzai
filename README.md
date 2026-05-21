@@ -33,7 +33,7 @@
 - 仓库地址
 
 ```sh
-https://github.com/xiuxianjs/alemonjs-load-yunzai.git
+https://github.com/yunzaijs/alemonjs-load-yunzai.git
 ```
 
 - 仓库分支
