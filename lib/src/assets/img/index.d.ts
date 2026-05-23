@@ -1,0 +1,21 @@
+export declare const UI_ICONS: {
+    readonly abyss: string;
+    readonly ledger: string;
+    readonly paimon: string;
+    readonly role: string;
+    readonly sign: string;
+    readonly team: string;
+    readonly weapon: string;
+    readonly resin: string;
+    readonly primogem: string;
+    readonly starglitter: string;
+    readonly fate: string;
+    readonly miyoushe: string;
+    readonly help: string;
+    readonly bind: string;
+    readonly record: string;
+    readonly stats: string;
+    readonly guide: string;
+    readonly checkin: string;
+    readonly tcg: string;
+};

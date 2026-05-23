@@ -22,6 +22,44 @@
 - `manager` 是机器人进程内唯一的 Yunzai 控制面。
 - `worker` / `Yunzai` 为独立子进程，不直接暴露给 Web 或 desktop。
 
+## OneBot 兼容
+
+当前兼容策略是明确的双通道：
+
+- `onebot` 平台走 `OneBot -> icqq-compatible adapter`
+- 其他平台走 AlemonJS 通用消息模型降级兼容
+
+实现位置：
+
+- OneBot adapter: [src/yunzai/adapters/onebot-icqq.ts](./src/yunzai/adapters/onebot-icqq.ts)
+- 事件桥接分流: [src/yunzai/bridge.ts](./src/yunzai/bridge.ts)
+- Worker 路由与通用兜底: [src/yunzai/worker.ts](./src/yunzai/worker.ts)
+
+当前已经覆盖的兼容面：
+
+- `Bot / Friend / Group / Member`
+- `Bot[uin]`
+- 私聊 / 群聊 / `notice` / `request`
+- `makeForwardMsg`
+- `reply`
+- `source`
+- `getChatHistory`
+
+## 测试
+
+OneBot 兼容回归测试入口：
+
+```sh
+yarn test
+```
+
+当前测试资产：
+
+- 主测试: [tests/onebot-compat.test.mjs](./tests/onebot-compat.test.mjs)
+- 事件 fixture: [tests/fixtures/onebot-events.mjs](./tests/fixtures/onebot-events.mjs)
+
+新增兼容修复时，优先补对应 fixture 和断言，再改实现，避免回到“线上告警驱动散补”的方式。
+
 详细拓扑、职责和升级路径见 [docs/architecture.md](./docs/architecture.md)。
 
 ### 安装
@@ -38,8 +76,8 @@ https://github.com/yunzaijs/alemonjs-load-yunzai.git
 
 - 仓库分支
 
-```sh
-release
+```sh title="alemon.config.yaml"
+release: 123
 ```
 
 - alemon.config.yaml
