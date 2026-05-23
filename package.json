@@ -1,6 +1,6 @@
 {
   "name": "alemonjs-load-yunzai",
-  "version": "1.0.0-rc.0",
+  "version": "1.0.0",
   "description": "yunzai-bot",
   "author": "ningmengchongshui",
   "type": "module",
@@ -15,6 +15,8 @@
     "dev": "npx lvy app.ts --serverPort 17187",
     "view": "npx lvy app.ts --jsxp",
     "build": "lvy build",
+    "test": "yarn test:onebot-compat",
+    "test:onebot-compat": "yarn build && node --test tests/onebot-compat.test.mjs",
     "lint": "eslint src --ext .ts,.tsx,.js --max-warnings=0",
     "lint:fix": "eslint src --ext .ts,.tsx,.js --fix --max-warnings=0",
     "format": "prettier --write .",

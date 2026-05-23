@@ -17,6 +17,10 @@ import type { IPCApiRequest, IPCDone, IPCMedia, IPCReply, ReplyContent } from '.
  */
 let _oneBotAPI: any = null;
 
+function isOneBotPlatform(platform?: string): boolean {
+  return platform === 'onebot';
+}
+
 async function loadOneBotClient(): Promise<void> {
   if (_oneBotAPI !== null) {
     return;
@@ -38,6 +42,10 @@ async function loadOneBotClient(): Promise<void> {
  * 仅 OneBot 平台可用，其他平台返回 null
  */
 function getOneBotClient(event: EventsEnum): any {
+  if (!isOneBotPlatform(event.Platform)) {
+    return null;
+  }
+
   if (!_oneBotAPI || _oneBotAPI === false) {
     return null;
   }
@@ -808,6 +816,10 @@ function extractMedia(event: any): IPCMedia[] {
  * 仅当 value 包含 post_type 字段时才认定为 OneBot 事件
  */
 function extractRawEvent(event: any, rawE: any): any {
+  if (!isOneBotPlatform(event?.Platform ?? rawE?.Platform)) {
+    return undefined;
+  }
+
   try {
     const v = event.value ?? rawE?.value;
 
