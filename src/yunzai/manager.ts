@@ -27,6 +27,36 @@ function getStartFailedPath(): string {
   return join(getYunzaiDir(), '.last_start_failed');
 }
 
+function readGitBranchName(repoDir: string): string {
+  try {
+    const gitPath = join(repoDir, '.git');
+    let headPath = join(gitPath, 'HEAD');
+
+    try {
+      const gitFile = readFileSync(gitPath, 'utf-8').trim();
+      const gitdir = gitFile.match(/^gitdir:\s*(.+)$/i)?.[1];
+
+      if (gitdir) {
+        headPath = join(repoDir, gitdir, 'HEAD');
+      }
+    } catch {}
+
+    const head = readFileSync(headPath, 'utf-8').trim();
+
+    return head.match(/^ref:\s+refs\/heads\/(.+)$/)?.[1] ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function isPureEditionPackage(pkg: any, repoDir: string): boolean {
+  if (pkg?.pureEdition === true) {
+    return true;
+  }
+
+  return /pure/i.test(readGitBranchName(repoDir));
+}
+
 function sanitizePluginDirName(name: string): string {
   return name
     .trim()
@@ -421,9 +451,16 @@ class YunzaiManager {
     }
 
     const pkgName = String(pkg?.name ?? '').toLowerCase();
+    const pureEdition = isPureEditionPackage(pkg, yunzaiDir);
+    const isMiaoVariant =
+      pkgName === 'miao-yunzai' ||
+      pkgName === 'miao_yunzai' ||
+      typeof pkg?.imports?.['#miao'] === 'string' ||
+      typeof pkg?.imports?.['#miao.models'] === 'string' ||
+      typeof pkg?.scripts?.ksr === 'string';
     const missing: string[] = [];
 
-    if (pkgName === 'miao-yunzai' || pkgName === 'miao_yunzai') {
+    if (!pureEdition && isMiaoVariant) {
       const miaoPluginDir = join(yunzaiDir, 'plugins', 'miao-plugin');
       const miaoPluginEntry = join(miaoPluginDir, 'components', 'index.js');
 
@@ -686,19 +723,28 @@ class YunzaiManager {
   /** 使用内置 yarn 安装依赖（原生支持 workspaces，插件子包依赖一并安装） */
   private npmInstall(cwd: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const cp = execFile(process.execPath, [YARN_PATH, 'install', '--production=false'], { cwd, timeout: 1_800_000 }, (err, stdout, stderr) => {
+      const restorePackageJson = this.patchPackageJsonForInstall(cwd);
+
+      try {
+        const cp = execFile(process.execPath, [YARN_PATH, 'install', '--production=false'], { cwd, timeout: 1_800_000 }, (err, stdout, stderr) => {
+          this.taskProcess = null;
+          restorePackageJson();
+          if (err) {
+            const hint = (err as any).killed ? ' (超时)' : '';
+            const detail = stderr?.trim() ? `${stderr.trim()}\n${err.message}` : err.message;
+
+            reject(new Error(`${detail}${hint}`));
+          } else {
+            resolve(stdout);
+          }
+        });
+
+        this.taskProcess = cp;
+      } catch (err) {
         this.taskProcess = null;
-        if (err) {
-          const hint = (err as any).killed ? ' (超时)' : '';
-          const detail = stderr?.trim() ? `${stderr.trim()}\n${err.message}` : err.message;
-
-          reject(new Error(`${detail}${hint}`));
-        } else {
-          resolve(stdout);
-        }
-      });
-
-      this.taskProcess = cp;
+        restorePackageJson();
+        reject(err);
+      }
     });
   }
 
@@ -881,8 +927,77 @@ class YunzaiManager {
   }
 
   /**
-   * 确保 package.json 包含 private 和 workspaces 字段
-   * Yarn 1.x 要求 private: true 才能启用 workspaces
+   * 安装依赖前临时补齐 package.json 字段，安装后恢复原样。
+   * 目的：
+   * 1. Yarn 1.x 需要 private: true 才能启用 workspaces
+   * 2. 某些 Yunzai 分支未做命名空间隔离，临时补一个私有 scoped name 能降低依赖解析异常
+   */
+  private patchPackageJsonForInstall(cwd: string): () => void {
+    const pkgPath = join(cwd, 'package.json');
+    const backupPath = join(cwd, 'package.json.text');
+
+    if (!existsSync(pkgPath)) {
+      return () => {};
+    }
+
+    let raw = '';
+    let pkg: any;
+
+    try {
+      raw = readFileSync(pkgPath, 'utf-8');
+      pkg = JSON.parse(raw);
+    } catch (err: any) {
+      logger.warn(`[Yunzai] package.json 解析失败: ${err.message}`);
+
+      return () => {};
+    }
+
+    let modified = false;
+
+    if (pkg.private !== true) {
+      pkg.private = true;
+      modified = true;
+      logger.info('[Yunzai] 依赖安装前临时补充 private: true');
+    }
+
+    const workspaces = Array.isArray(pkg.workspaces) ? [...pkg.workspaces] : [];
+
+    if (!workspaces.includes('plugins/*')) {
+      pkg.workspaces = [...workspaces, 'plugins/*'];
+      modified = true;
+      logger.info('[Yunzai] 依赖安装前临时补充 workspaces: ["plugins/*"]');
+    }
+
+    if (typeof pkg.name !== 'string' || !pkg.name.startsWith('@')) {
+      pkg.name = '@alemonjs/yunzai-workspace';
+      modified = true;
+      logger.info('[Yunzai] 依赖安装前临时补充私有命名空间包名: @alemonjs/yunzai-workspace');
+    }
+
+    if (modified) {
+      writeFileSync(backupPath, raw, 'utf-8');
+      writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
+    }
+
+    return () => {
+      if (!modified) {
+        return;
+      }
+      try {
+        if (existsSync(backupPath)) {
+          writeFileSync(pkgPath, readFileSync(backupPath, 'utf-8'), 'utf-8');
+          rmSync(backupPath, { force: true });
+        }
+        logger.info('[Yunzai] 依赖安装完成，已恢复 package.json 原始字段');
+      } catch (err: any) {
+        logger.warn(`[Yunzai] 恢复 package.json 失败: ${err.message}`);
+      }
+    };
+  }
+
+  /**
+   * 预检查 package.json 是否存在并可解析。
+   * 真正的临时补字段在 npmInstall() 内执行并自动恢复。
    */
   private ensureWorkspaces(): void {
     const pkgPath = `${getYunzaiDir()}/package.json`;
@@ -891,33 +1006,10 @@ class YunzaiManager {
       return;
     }
 
-    let pkg: any;
-
     try {
-      const raw = readFileSync(pkgPath, 'utf-8');
-
-      pkg = JSON.parse(raw);
+      JSON.parse(readFileSync(pkgPath, 'utf-8'));
     } catch (err: any) {
       logger.warn(`[Yunzai] package.json 解析失败: ${err.message}`);
-
-      return;
-    }
-    let modified = false;
-
-    if (!pkg.private) {
-      pkg.private = true;
-      modified = true;
-      logger.info('[Yunzai] package.json 补充 private: true');
-    }
-
-    if (!Array.isArray(pkg.workspaces) || !pkg.workspaces.includes('plugins/*')) {
-      pkg.workspaces = ['plugins/*'];
-      modified = true;
-      logger.info('[Yunzai] package.json 补充 workspaces: ["plugins/*"]');
-    }
-
-    if (modified) {
-      writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
     }
   }
 }

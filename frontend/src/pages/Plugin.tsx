@@ -74,6 +74,7 @@ const RECOMMENDED_GROUP_LABELS: Record<string, string> = {
 
 interface PluginState {
   installed: boolean;
+  pureEdition: boolean;
   busy: boolean;
   plugins: PluginItem[];
   catalog: CatalogItem[];
@@ -177,6 +178,7 @@ export default function Plugin() {
   const cachedOnlineCatalog = readOnlinePluginCache();
   const [state, setState] = useState<PluginState>({
     installed: false,
+    pureEdition: false,
     busy: false,
     plugins: [],
     catalog: [],
@@ -215,6 +217,7 @@ export default function Plugin() {
 
         setState({
           installed: d.installed as boolean,
+          pureEdition: d.pureEdition === true,
           busy: d.busy as boolean,
           plugins,
           catalog: (d.catalog as CatalogItem[]) ?? [],
@@ -394,7 +397,7 @@ export default function Plugin() {
               在线插件
             </TabBtn>
             <TabBtn active={pluginTab === 'custom'} onClick={() => setPluginTab('custom')}>
-              URL 安装
+              自定义安装
             </TabBtn>
           </div>
         </HeaderDiv>
@@ -404,7 +407,7 @@ export default function Plugin() {
         <SecondaryDiv className='rounded-xl overflow-hidden'>
           <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>
             <div className='flex items-center gap-2'>
-              <span className='text-sm font-semibold'>🐱 必装插件</span>
+              <span className='text-sm font-semibold'>{state.pureEdition ? '🐱 可选增强插件' : '🐱 必装插件'}</span>
               <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>{requiredPlugin.installed ? '已安装' : '未安装'}</TagDiv>
             </div>
           </HeaderDiv>
@@ -416,9 +419,13 @@ export default function Plugin() {
                 border: requiredPlugin.installed ? '1px solid rgba(34,197,94,.15)' : '1px solid rgba(245,158,11,.18)'
               }}
             >
-              {requiredPlugin.installed
-                ? 'miao-plugin 已安装。该插件被视为核心依赖，建议保留并优先维护。'
-                : 'miao-plugin 被视为必装插件。未安装时，部分能力可能出现异常或不可用。'}
+              {state.pureEdition
+                ? requiredPlugin.installed
+                  ? '当前为 Miao-Yunzai 纯净版。miao-plugin 已安装，将作为可选增强插件提供扩展能力。'
+                  : '当前为 Miao-Yunzai 纯净版。miao-plugin 为可选插件，未安装时相关扩展能力会降级，但宿主仍可正常启动。'
+                : requiredPlugin.installed
+                  ? 'miao-plugin 已安装。该插件被视为核心依赖，建议保留并优先维护。'
+                  : 'miao-plugin 被视为必装插件。未安装时，部分能力可能出现异常或不可用。'}
             </div>
 
             <div className='flex items-start gap-3'>

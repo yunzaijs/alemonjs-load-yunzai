@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { getAllPlugins, getPluginInfo, getYunzaiDir } from '../path';
 import { manager } from './manager';
@@ -49,6 +49,23 @@ function getLogCount(): number {
   return readdirSync(logsDir).filter(f => f.endsWith('.log')).length;
 }
 
+function readPureEdition(): boolean {
+  const yunzaiDir = getYunzaiDir();
+  const pkgPath = join(yunzaiDir, 'package.json');
+
+  if (!existsSync(pkgPath)) {
+    return false;
+  }
+
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+
+    return pkg?.pureEdition === true;
+  } catch {
+    return false;
+  }
+}
+
 export function getStatusSnapshotLocal() {
   const installedPlugins = manager.isInstalled ? getInstalledPlugins() : [];
   const installedSet = new Set(installedPlugins.map(p => p.name));
@@ -63,6 +80,7 @@ export function getStatusSnapshotLocal() {
   return {
     status: manager.getStatus(),
     installed: manager.isInstalled,
+    pureEdition: readPureEdition(),
     running: manager.isRunning,
     busy: manager.isBusy,
     busyTask: manager.busyTaskName,
