@@ -14,6 +14,7 @@ export interface CatalogItem {
 export declare function getStatusSnapshotLocal(): {
     status: string;
     installed: boolean;
+    pureEdition: boolean;
     running: boolean;
     busy: boolean;
     busyTask: string;

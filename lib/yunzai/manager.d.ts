@@ -57,6 +57,7 @@ declare class YunzaiManager {
     updatePlugin(plugin: PluginInfo, force?: boolean): Promise<string>;
     uninstallPlugin(plugin: PluginInfo): void;
     installDeps(): Promise<string>;
+    private patchPackageJsonForInstall;
     private ensureWorkspaces;
 }
 export declare const manager: YunzaiManager;

@@ -101,6 +101,7 @@ export declare function getStatusData(): Promise<{
     };
     status: string;
     installed: boolean;
+    pureEdition: boolean;
     running: boolean;
     busy: boolean;
     busyTask: string;
