@@ -383,6 +383,8 @@ function injectGlobals(): void {
   const uinList = new CompatUinList(10000);
   const botInstance: any = {
     nickname: 'Yunzai',
+    /** Yunzai 插件常用的 Bot.logger 全局日志入口 */
+    logger: g.logger,
     /** 频道 tiny_id（非频道场景为空字符串） */
     tiny_id: '',
     /** 头像 URL */
@@ -863,8 +865,8 @@ async function serializeReply(msg: any): Promise<ReplyContent[]> {
     return results.flat();
   }
   if (msg && typeof msg === 'object') {
-    if (Array.isArray((msg).__forwardParts)) {
-      return serializeReply((msg).__forwardParts);
+    if (Array.isArray(msg.__forwardParts)) {
+      return serializeReply(msg.__forwardParts);
     }
 
     switch (msg.type) {
