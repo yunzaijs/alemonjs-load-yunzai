@@ -1,102 +1,158 @@
 {
-  "name": "alemonjs-load-yunzai",
-  "version": "1.0.2",
-  "description": "yunzai-bot",
-  "author": "ningmengchongshui",
-  "type": "module",
-  "main": "./lib/index.js",
-  "exports": {
-    ".": "./lib/index.js",
-    "./package": "./package.json",
-    "./desktop": "./lib/desktop.js"
-  },
-  "scripts": {
-    "app": "node index.js",
-    "dev": "npx lvy app.ts --serverPort 17187",
-    "view": "npx lvy app.ts --jsxp",
-    "build": "lvy build",
-    "test": "yarn test:onebot-compat",
-    "test:onebot-compat": "yarn build && node --test tests/onebot-compat.test.mjs",
-    "lint": "eslint src --ext .ts,.tsx,.js --max-warnings=0",
-    "lint:fix": "eslint src --ext .ts,.tsx,.js --fix --max-warnings=0",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "prepare": "husky",
-    "precommit": "lint-staged"
-  },
-  "dependencies": {
-    "@koa/multer": "^4.0.0",
-    "classnames": "^2.5.1",
-    "extract-zip": "^2.0.1",
-    "isomorphic-git": "^1.37.4",
-    "jsxp": "^1.4.0",
-    "koa-bodyparser": "^4.4.1",
-    "koa-router": "^14.0.0",
-    "markdown-to-jsx": "^9.7.13",
-    "md5": "^2.3.0",
-    "multer": "^2.0.2"
-  },
-  "devDependencies": {
-    "@alemonjs/bubble": "^2.1.11",
-    "@alemonjs/db": "^0.0.17",
-    "@alemonjs/discord": "^2.1.23",
-    "@alemonjs/onebot": "^2.1.16",
-    "@alemonjs/qq-bot": "^2.1.26",
-    "@eslint/js": "^9.18.0",
-    "@types/koa-bodyparser": "^4.3.13",
-    "@types/koa-router": "^7.4.9",
-    "alemonjs": "^2.1.86",
-    "eslint": "^9.18.0",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-react": "^7.37.3",
-    "globals": "^15.14.0",
-    "husky": "^9.1.7",
-    "lint-staged": "^16.1.5",
-    "lvyjs": "0.3.0-alpha.2",
-    "prettier": "^3",
-    "sass": "^1.90.0",
-    "tailwindcss": "3",
-    "typescript-eslint": "^8.19.1"
-  },
-  "alemonjs": {
-    "web": {
-      "root": "dist"
+    "name": "alemonjs-load-yunzai",
+    "version": "1.0.2",
+    "description": "yunzai-bot",
+    "author": "ningmengchongshui",
+    "type": "module",
+    "main": "./lib/index.js",
+    "exports": {
+        ".": "./lib/index.js",
+        "./package": "./package.json",
+        "./desktop": "./lib/desktop.js"
     },
-    "desktop": {
-      "command": [
-        {
-          "name": "yunzai",
-          "command": "open.yunzai"
+    "scripts": {
+        "app": "node index.js",
+        "dev": "npx lvy app.ts --serverPort 17187",
+        "view": "npx lvy app.ts --jsxp",
+        "build": "lvy build",
+        "test": "yarn test:onebot-compat",
+        "test:onebot-compat": "yarn build && node --test tests/onebot-compat.test.mjs",
+        "lint": "eslint src --ext .ts,.tsx,.js --max-warnings=0",
+        "lint:fix": "eslint src --ext .ts,.tsx,.js --fix --max-warnings=0",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "prepare": "husky",
+        "precommit": "lint-staged"
+    },
+    "dependencies": {
+        "@koa/multer": "^4.0.0",
+        "classnames": "^2.5.1",
+        "extract-zip": "^2.0.1",
+        "isomorphic-git": "^1.37.4",
+        "jsxp": "^1.4.0",
+        "koa-bodyparser": "^4.4.1",
+        "koa-router": "^14.0.0",
+        "markdown-to-jsx": "^9.7.13",
+        "md5": "^2.3.0",
+        "multer": "^2.0.2"
+    },
+    "devDependencies": {
+        "@alemonjs/bubble": "^2.1.11",
+        "@alemonjs/db": "^0.0.17",
+        "@alemonjs/discord": "^2.1.23",
+        "@alemonjs/onebot": "^2.1.16",
+        "@alemonjs/qq-bot": "^2.1.26",
+        "@eslint/js": "^9.18.0",
+        "@types/koa-bodyparser": "^4.3.13",
+        "@types/koa-router": "^7.4.9",
+        "alemonjs": "^2.1.86",
+        "eslint": "^9.18.0",
+        "eslint-config-prettier": "^10.1.8",
+        "eslint-plugin-react": "^7.37.3",
+        "globals": "^15.14.0",
+        "husky": "^9.1.7",
+        "lint-staged": "^16.1.5",
+        "lvyjs": "0.3.0-alpha.2",
+        "prettier": "^3",
+        "sass": "^1.90.0",
+        "tailwindcss": "3",
+        "typescript-eslint": "^8.19.1"
+    },
+    "alemonjs": {
+        "web": {
+            "root": "dist"
+        },
+        "config": [
+            {
+                "name": "bot_name",
+                "type": "string",
+                "required": false,
+                "description": "Bot 目录名"
+            },
+            {
+                "name": "gh_proxy",
+                "type": "string",
+                "required": false,
+                "rules": [
+                    {
+                        "pattern": "^http://|^https://",
+                        "message": "代理必须以http://或https://开头"
+                    },
+                    {
+                        "pattern": "^(http|https)://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$",
+                        "message": "代理格式不正确"
+                    }
+                ],
+                "description": "GitHub 代理前缀"
+            },
+            {
+                "name": "yunzai_repo",
+                "type": "string",
+                "required": false,
+                "rules": [
+                    {
+                        "pattern": "^http://|^https://",
+                        "message": "仓库地址必须以http://或https://开头"
+                    },
+                    {
+                        "pattern": "^(http|https)://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$",
+                        "message": "仓库地址格式不正确"
+                    }
+                ],
+                "description": "Yunzai 仓库地址"
+            },
+            {
+                "name": "miao_plugin_repo",
+                "type": "string",
+                "required": false,
+                "rules": [
+                    {
+                        "pattern": "^http://|^https://",
+                        "message": "仓库地址必须以http://或https://开头"
+                    },
+                    {
+                        "pattern": "^(http|https)://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$",
+                        "message": "仓库地址格式不正确"
+                    }
+                ],
+                "description": "miao-plugin 仓库地址"
+            }
+        ],
+        "desktop": {
+            "command": [
+                {
+                    "name": "yunzai",
+                    "command": "open.yunzai"
+                }
+            ],
+            "sidebars": [
+                {
+                    "name": "yunzai",
+                    "command": "open.yunzai"
+                }
+            ]
         }
-      ],
-      "sidebars": [
-        {
-          "name": "yunzai",
-          "command": "open.yunzai"
-        }
-      ]
-    }
-  },
-  "lint-staged": {
-    "*.{js,ts,tsx}": [
-      "prettier --write",
-      "eslint --fix --max-warnings=0 --no-warn-ignored"
+    },
+    "lint-staged": {
+        "*.{js,ts,tsx}": [
+            "prettier --write",
+            "eslint --fix --max-warnings=0 --no-warn-ignored"
+        ],
+        "*.{json,md,yml,yaml,css,scss,html}": [
+            "prettier --write"
+        ]
+    },
+    "packageManager": "yarn@1.22.22",
+    "keywords": [
+        "alemonjs"
     ],
-    "*.{json,md,yml,yaml,css,scss,html}": [
-      "prettier --write"
-    ]
-  },
-  "packageManager": "yarn@1.22.22",
-  "keywords": [
-    "alemonjs"
-  ],
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org",
-    "access": "public"
-  },
-  "bugs": "https://github.com/yunzaijs/alemonjs-load-yunzai/issues",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/yunzaijs/alemonjs-load-yunzai.git"
-  }
+    "publishConfig": {
+        "registry": "https://registry.npmjs.org",
+        "access": "public"
+    },
+    "bugs": "https://github.com/yunzaijs/alemonjs-load-yunzai/issues",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/yunzaijs/alemonjs-load-yunzai.git"
+    }
 }
