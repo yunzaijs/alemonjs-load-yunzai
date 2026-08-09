@@ -59,7 +59,9 @@
   "alemonjs": {
     "web": {
       "root": "dist",
-      "serverPort": true
+      "config": {
+        "serverPort": true
+      }
     },
     "config": [
       {
