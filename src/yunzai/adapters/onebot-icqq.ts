@@ -116,6 +116,59 @@ export function createOneBotRuntime(deps: {
     };
   }
 
+  function getCachedGroupRecord(groupId: number, opts?: OneBotGroupOptions) {
+    const cached = botState?.gl?.get(groupId);
+
+    return normalizeGroupRecord({
+      group_id: groupId,
+      group_name: opts?.name ?? cached?.group_name ?? `Group ${groupId}`,
+      ...cached
+    });
+  }
+
+  function cacheGroupRecord(groupId: number, group: any, opts?: OneBotGroupOptions) {
+    const definedGroup = Object.fromEntries(Object.entries(group ?? {}).filter(([, value]) => value !== undefined));
+    const normalized = normalizeGroupRecord({
+      ...getCachedGroupRecord(groupId, opts),
+      ...definedGroup,
+      group_id: groupId
+    });
+
+    botState?.gl?.set(groupId, normalized);
+
+    return normalized;
+  }
+
+  function getCachedMemberRecord(groupId: number, userId: number) {
+    return normalizeMemberRecord(memberCache.get(groupId)?.get(userId) ?? botState?.gml?.get(groupId)?.get(userId) ?? { user_id: userId });
+  }
+
+  function cacheMemberRecord(groupId: number, userId: number, member: any) {
+    const normalized = normalizeMemberRecord({ ...getCachedMemberRecord(groupId, userId), ...member, user_id: userId });
+    let members = memberCache.get(groupId) ?? botState?.gml?.get(groupId);
+
+    members ??= new Map();
+    members.set(userId, normalized);
+    memberCache.set(groupId, members);
+    botState?.gml?.set(groupId, members);
+    touchMemberCache(groupId);
+
+    return normalized;
+  }
+
+  function removeCachedMember(groupId: number, userId: number): void {
+    memberCache.get(groupId)?.delete(userId);
+    botState?.gml?.get(groupId)?.delete(userId);
+  }
+
+  function fetchMemberRecord(groupId: number, userId: number, noCache = false) {
+    const cached = getCachedMemberRecord(groupId, userId);
+
+    return callApi('getGroupMemberInfo', { group_id: groupId, user_id: userId, ...(noCache ? { no_cache: true } : {}) })
+      .then((res: any) => cacheMemberRecord(groupId, userId, res?.data ?? cached))
+      .catch(() => cached);
+  }
+
   function extractText(message: any[]): string {
     return message
       .filter((s: any) => s.type === 'text')
@@ -195,8 +248,18 @@ export function createOneBotRuntime(deps: {
     return wrapCompatValue(
       {
         group_id: groupId,
-        group_name: opts?.name ?? `Group ${groupId}`,
-        name: opts?.name ?? `Group ${groupId}`,
+        get group_name() {
+          return getCachedGroupRecord(groupId, opts).group_name;
+        },
+        get name() {
+          return getCachedGroupRecord(groupId, opts).group_name;
+        },
+        get member_count() {
+          return getCachedGroupRecord(groupId, opts).member_count;
+        },
+        get max_member_count() {
+          return getCachedGroupRecord(groupId, opts).max_member_count;
+        },
         is_owner: opts?.is_owner ?? false,
         is_admin: opts?.is_admin ?? false,
         mute_left: 0,
@@ -224,55 +287,69 @@ export function createOneBotRuntime(deps: {
             })
             .catch(() => memberCache.get(groupId) ?? botState?.gml?.get(groupId) ?? new Map()),
         pickMember: (uid: number) => {
-          const cached = normalizeMemberRecord(memberCache.get(groupId)?.get(uid) ?? botState?.gml?.get(groupId)?.get(uid) ?? {});
+          const current = () => getCachedMemberRecord(groupId, uid);
+          const updateAfter = (action: string, params: Record<string, any>, patch: Record<string, any> = {}, remove = false) => callApi(action, params)
+              .then((result: any) => {
+                if (remove) {
+                  removeCachedMember(groupId, uid);
+                } else {
+                  cacheMemberRecord(groupId, uid, { ...current(), ...patch });
+                }
+
+                return result;
+              })
+              .catch(() => false);
 
           return {
             user_id: uid,
             group_id: groupId,
-            card: cached.card,
-            nickname: cached.nickname,
-            remark: cached.remark,
-            title: cached.title,
-            role: cached.role,
-            level: cached.level,
-            is_admin: cached.role === 'admin' || cached.role === 'owner',
-            is_owner: cached.role === 'owner',
+            get card() {
+              return current().card;
+            },
+            get nickname() {
+              return current().nickname;
+            },
+            get remark() {
+              return current().remark;
+            },
+            get title() {
+              return current().title;
+            },
+            get role() {
+              return current().role;
+            },
+            get level() {
+              return current().level;
+            },
+            get is_admin() {
+              return current().role === 'admin' || current().role === 'owner';
+            },
+            get is_owner() {
+              return current().role === 'owner';
+            },
             is_friend: false,
-            mute_left: cached?.shut_up_timestamp ? Math.max(0, cached.shut_up_timestamp - Math.floor(Date.now() / 1000)) : 0,
+            get mute_left() {
+              const timestamp = current().shut_up_timestamp;
+
+              return timestamp ? Math.max(0, timestamp - Math.floor(Date.now() / 1000)) : 0;
+            },
+            get _info() {
+              return current();
+            },
             group: createOneBotGroupAdapter(groupId, opts),
-            info: callApi('getGroupMemberInfo', { group_id: groupId, user_id: uid })
-              .then((res: any) => {
-                const normalized = normalizeMemberRecord(res?.data ?? cached);
-
-                if (!memberCache.has(groupId)) {
-                  memberCache.set(groupId, new Map());
-                }
-                memberCache.get(groupId)!.set(uid, normalized);
-                touchMemberCache(groupId);
-                botState?.gml?.set(groupId, memberCache.get(groupId)!);
-
-                return normalized;
-              })
-              .catch(() => cached),
-            renew: () => callApi('getGroupMemberInfo', { group_id: groupId, user_id: uid, no_cache: true })
-                .then((res: any) => {
-                  const normalized = normalizeMemberRecord(res?.data ?? cached);
-
-                  if (!memberCache.has(groupId)) {
-                    memberCache.set(groupId, new Map());
-                  }
-                  memberCache.get(groupId)!.set(uid, normalized);
-                  touchMemberCache(groupId);
-                  botState?.gml?.set(groupId, memberCache.get(groupId)!);
-
-                  return normalized;
-                })
-                .catch(() => cached),
-            setAdmin: (yes = true) => callApi('setGroupAdmin', { group_id: groupId, user_id: uid, enable: yes }).catch(() => false),
-            setTitle: (title = '', duration = -1) => callApi('setGroupSpecialTitle', { group_id: groupId, user_id: uid, special_title: title, duration }).catch(() => false),
-            setCard: (card = '') => callApi('setGroupCard', { group_id: groupId, user_id: uid, card }).catch(() => false),
-            kick: (_msg = '', block = false) => callApi('setGroupKick', { group_id: groupId, user_id: uid, reject_add_request: block }).catch(() => false),
-            mute: (duration = 600) => callApi('setGroupBan', { group_id: groupId, user_id: uid, duration }).catch(() => false),
+            get info() {
+              return fetchMemberRecord(groupId, uid);
+            },
+            renew: () => fetchMemberRecord(groupId, uid, true),
+            setAdmin: (yes = true) => updateAfter('setGroupAdmin', { group_id: groupId, user_id: uid, enable: yes }, { role: yes ? 'admin' : 'member' }),
+            setTitle: (title = '', duration = -1) => updateAfter('setGroupSpecialTitle', { group_id: groupId, user_id: uid, special_title: title, duration }, { title }),
+            setCard: (card = '') => updateAfter('setGroupCard', { group_id: groupId, user_id: uid, card }, { card, remark: card }),
+            kick: (_msg = '', block = false) => updateAfter('setGroupKick', { group_id: groupId, user_id: uid, reject_add_request: block }, {}, true),
+            mute: (duration = 600) => updateAfter(
+                'setGroupBan',
+                { group_id: groupId, user_id: uid, duration },
+                { shut_up_timestamp: duration > 0 ? Math.floor(Date.now() / 1000) + duration : 0 }
+              ),
             poke: () => callApi('pokeMember', { group_id: groupId, user_id: uid }).catch(() => false),
             addFriend: (comment = '') => callApi('_add_friend', { user_id: uid, comment }).catch(() => false),
             setScreenMsg: (isScreen = true) => callApi('_set_group_screen_msg', { group_id: groupId, user_id: uid, is_screen: isScreen }).catch(() => false),
@@ -280,19 +357,31 @@ export function createOneBotRuntime(deps: {
           };
         },
         recallMsg: (messageId: any) => callApi('deleteMsg', { message_id: messageId }).catch(() => false),
-        muteMember: (uid: number, duration = 600) => callApi('setGroupBan', { group_id: groupId, user_id: uid, duration }).catch(() => false),
-        kickMember: (uid: number, rejectAdd = false) => callApi('setGroupKick', { group_id: groupId, user_id: uid, reject_add_request: rejectAdd }).catch(() => false),
+        muteMember: (uid: number, duration = 600) => createOneBotGroupAdapter(groupId, opts).pickMember(uid).mute(duration),
+        kickMember: (uid: number, rejectAdd = false) => createOneBotGroupAdapter(groupId, opts).pickMember(uid).kick('', rejectAdd),
         pokeMember: (uid: number) => callApi('pokeMember', { group_id: groupId, user_id: uid }).catch(() => false),
-        setCard: (uid: number, card: string) => callApi('setGroupCard', { group_id: groupId, user_id: uid, card }).catch(() => false),
-        setAdmin: (uid: number, enable = true) => callApi('setGroupAdmin', { group_id: groupId, user_id: uid, enable }).catch(() => false),
-        setTitle: (uid: number, title: string, duration = -1) => callApi('setGroupSpecialTitle', { group_id: groupId, user_id: uid, special_title: title, duration }).catch(() => false),
+        setCard: (uid: number, card: string) => createOneBotGroupAdapter(groupId, opts).pickMember(uid).setCard(card),
+        setAdmin: (uid: number, enable = true) => createOneBotGroupAdapter(groupId, opts).pickMember(uid).setAdmin(enable),
+        setTitle: (uid: number, title: string, duration = -1) => createOneBotGroupAdapter(groupId, opts).pickMember(uid).setTitle(title, duration),
         quit: () => callApi('setGroupLeave', { group_id: groupId }).catch(() => false),
-        setName: (name: string) => callApi('setGroupName', { group_id: groupId, group_name: name }).catch(() => false),
-        muteAll: (enable = true) => callApi('setGroupWholeBan', { group_id: groupId, enable }).catch(() => false),
+        setName: (name: string) => callApi('setGroupName', { group_id: groupId, group_name: name })
+            .then((result: any) => {
+              cacheGroupRecord(groupId, { group_name: name }, opts);
+
+              return result;
+            })
+            .catch(() => false),
+        muteAll: (enable = true) => callApi('setGroupWholeBan', { group_id: groupId, enable })
+            .then((result: any) => {
+              cacheGroupRecord(groupId, { all_muted: enable }, opts);
+
+              return result;
+            })
+            .catch(() => false),
         makeForwardMsg: (nodes: any[]) => buildForwardMsgCompat(nodes),
         getInfo: () => callApi('getGroupInfo', { group_id: groupId })
-            .then((res: any) => normalizeGroupRecord(res?.data ?? { group_id: groupId, group_name: opts?.name ?? `Group ${groupId}` }))
-            .catch(() => normalizeGroupRecord({ group_id: groupId, group_name: opts?.name ?? `Group ${groupId}` })),
+            .then((res: any) => cacheGroupRecord(groupId, res?.data ?? {}, opts))
+            .catch(() => getCachedGroupRecord(groupId, opts)),
         getChatHistory: (seq: number, count = 1) => callApi('getChatHistory', { group_id: groupId, message_seq: seq, count })
             .then((res: any) => res?.data?.messages ?? res?.messages ?? res ?? [])
             .catch(() => []),
@@ -301,9 +390,11 @@ export function createOneBotRuntime(deps: {
             .catch(() => ''),
         getAvatarUrl: (size: 0 | 40 | 100 | 140 = 0) => `https://p.qlogo.cn/gh/${groupId}/${groupId}/${size || 640}/`,
         renew: () => callApi('getGroupInfo', { group_id: groupId, no_cache: true })
-            .then((res: any) => normalizeGroupRecord(res?.data ?? {}))
-            .catch(() => ({})),
-        all_muted: false,
+            .then((res: any) => cacheGroupRecord(groupId, res?.data ?? {}, opts))
+            .catch(() => getCachedGroupRecord(groupId, opts)),
+        get all_muted() {
+          return Boolean(getCachedGroupRecord(groupId, opts).all_muted);
+        },
         markRead: (seq?: number) => callApi('mark_group_msg_as_read', { group_id: groupId, message_seq: seq }).catch(() => {}),
         announce: (content: string) => callApi('_send_group_notice', { group_id: groupId, content }).catch(() => false),
         allowAnony: (yes = true) => callApi('set_group_anonymous', { group_id: groupId, enable: yes }).catch(() => false),
@@ -578,23 +669,33 @@ export function createOneBotRuntime(deps: {
       };
 
       if (groupId) {
+        cacheGroupRecord(groupId, { group_name: raw.group_name });
+        cacheMemberRecord(groupId, userId, {
+          ...raw.member,
+          ...raw.sender,
+          user_id: userId,
+          nickname: raw.sender?.nickname ?? raw.member?.nickname ?? data.userName ?? '',
+          card: raw.sender?.card ?? raw.member?.card ?? data.userName ?? ''
+        });
         e.group = createOneBotGroupAdapter(groupId);
       }
       if (userId) {
         e.friend = createOneBotFriendAdapter(userId, data.userName ?? 'User');
-        e.member = {
-          user_id: userId,
-          card: raw.sender?.card ?? raw.member?.card ?? data.userName ?? '',
-          nickname: raw.sender?.nickname ?? raw.member?.nickname ?? data.userName ?? '',
-          role: raw.sender?.role ?? 'member',
-          is_admin: raw.sender?.role === 'admin' || raw.sender?.role === 'owner',
-          is_owner: raw.sender?.role === 'owner',
-          _info: {
-            card: raw.sender?.card ?? raw.member?.card ?? data.userName ?? '',
-            nickname: raw.sender?.nickname ?? raw.member?.nickname ?? data.userName ?? ''
-          },
-          getAvatarUrl: (size = 0) => data.userAvatar ?? `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`
-        };
+        e.member = groupId
+          ? createOneBotGroupAdapter(groupId).pickMember(userId)
+          : {
+              user_id: userId,
+              card: raw.sender?.card ?? raw.member?.card ?? data.userName ?? '',
+              nickname: raw.sender?.nickname ?? raw.member?.nickname ?? data.userName ?? '',
+              role: raw.sender?.role ?? 'member',
+              is_admin: raw.sender?.role === 'admin' || raw.sender?.role === 'owner',
+              is_owner: raw.sender?.role === 'owner',
+              _info: {
+                card: raw.sender?.card ?? raw.member?.card ?? data.userName ?? '',
+                nickname: raw.sender?.nickname ?? raw.member?.nickname ?? data.userName ?? ''
+              },
+              getAvatarUrl: (size = 0) => data.userAvatar ?? `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`
+            };
       }
       e.sender = {
         user_id: userId,
@@ -638,6 +739,16 @@ export function createOneBotRuntime(deps: {
             message: replySegment.message ?? ''
           }
         : undefined);
+
+    if (isGroup && groupId) {
+      cacheGroupRecord(groupId, { group_name: raw.group_name });
+      cacheMemberRecord(groupId, userId, {
+        ...raw.sender,
+        user_id: userId,
+        nickname: raw.sender?.nickname ?? data.userName ?? '',
+        card: raw.sender?.card ?? raw.sender?.nickname ?? data.userName ?? ''
+      });
+    }
 
     const e: any = {
       post_type: raw.post_type ?? 'message',
@@ -688,20 +799,23 @@ export function createOneBotRuntime(deps: {
             friend: undefined
           }
         : { group: undefined, friend: createOneBotFriendAdapter(userId, raw.sender?.nickname ?? data.userName ?? 'User') }),
-      member: {
-        user_id: userId,
-        card: raw.sender?.card ?? raw.sender?.nickname ?? data.userName ?? '',
-        nickname: raw.sender?.nickname ?? data.userName ?? '',
-        role: raw.sender?.role ?? 'member',
-        is_admin: raw.sender?.role === 'admin' || raw.sender?.role === 'owner',
-        is_owner: raw.sender?.role === 'owner',
-        _info: {
-          card: raw.sender?.card ?? raw.sender?.nickname ?? data.userName ?? '',
-          nickname: raw.sender?.nickname ?? data.userName ?? '',
-          role: raw.sender?.role ?? 'member'
-        },
-        getAvatarUrl: (size = 0) => data.userAvatar || `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`
-      },
+      member:
+        isGroup && groupId
+          ? createOneBotGroupAdapter(groupId).pickMember(userId)
+          : {
+              user_id: userId,
+              card: raw.sender?.card ?? raw.sender?.nickname ?? data.userName ?? '',
+              nickname: raw.sender?.nickname ?? data.userName ?? '',
+              role: raw.sender?.role ?? 'member',
+              is_admin: raw.sender?.role === 'admin' || raw.sender?.role === 'owner',
+              is_owner: raw.sender?.role === 'owner',
+              _info: {
+                card: raw.sender?.card ?? raw.sender?.nickname ?? data.userName ?? '',
+                nickname: raw.sender?.nickname ?? data.userName ?? '',
+                role: raw.sender?.role ?? 'member'
+              },
+              getAvatarUrl: (size = 0) => data.userAvatar || `https://q1.qlogo.cn/g?b=qq&s=${size}&nk=${userId}`
+            },
       nickname: raw.sender?.card ?? raw.sender?.nickname ?? data.userName ?? 'User',
       makeForwardMsg: (nodes: any[]) => {
         if (isGroup && groupId) {

@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 
 import { createOneBotRuntime, isOneBotPlatform } from '../lib/yunzai/adapters/onebot-icqq.js';
 import {
+  assertOneBotActionSucceeded,
+  buildForwardMsgCompat,
+  getNativeMessageRequest,
+  getNativeOneBotRequest,
+  getNativeForwardRequest,
+  getReplyMessageId,
+  isUnsupportedOneBotActionError,
+  sendNativeForward
+} from '../lib/yunzai/forward.js';
+import { getExecutionContext, getExecutionContextForAction, runWithExecutionContext } from '../lib/yunzai/execution-context.js';
+import {
   oneBotGroupMessageEvent,
   oneBotNoticeEvent,
   oneBotPrivateMessageEvent,
@@ -52,6 +63,157 @@ test('isOneBotPlatform only matches onebot', () => {
   assert.equal(isOneBotPlatform('onebot'), true);
   assert.equal(isOneBotPlatform('qq-bot'), false);
   assert.equal(isOneBotPlatform(undefined), false);
+});
+
+test('execution contexts remain isolated across concurrent plugin work', async () => {
+  const seen = await Promise.all([
+    runWithExecutionContext({ msgId: 'event-a', platform: 'onebot' }, async () => {
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      return getExecutionContext();
+    }),
+    runWithExecutionContext({ msgId: 'event-b', platform: 'onebot' }, async () => {
+      await new Promise(resolve => setTimeout(resolve, 1));
+
+      return getExecutionContext();
+    })
+  ]);
+
+  assert.deepEqual(seen, [
+    { msgId: 'event-a', platform: 'onebot' },
+    { msgId: 'event-b', platform: 'onebot' }
+  ]);
+  assert.equal(getExecutionContextForAction('sendGroupMsg'), undefined);
+  assert.throws(() => getExecutionContextForAction('deleteMsg'), /缺少事件上下文/);
+});
+
+test('forward compatibility preserves nodes and builds a readable fallback', () => {
+  const nodes = [
+    { user_id: 10001, nickname: 'Alice', message: 'hello' },
+    {
+      type: 'node',
+      data: {
+        user_id: 10002,
+        nickname: 'Bob',
+        content: [{ type: 'image', file: 'https://example.com/a.png' }, { type: 'at', qq: 10003 }]
+      }
+    }
+  ];
+  const forward = buildForwardMsgCompat(nodes);
+
+  assert.equal(forward.type, 'forward');
+  assert.strictEqual(forward.__forwardNodes, nodes);
+  assert.deepEqual(forward.__forwardParts, [
+    { type: 'text', text: '【Alice】\n' },
+    { type: 'text', text: 'hello\n' },
+    { type: 'text', text: '【Bob】\n' },
+    { type: 'image', file: 'https://example.com/a.png' },
+    { type: 'at', qq: 10003 },
+    { type: 'text', text: '\n' }
+  ]);
+});
+
+test('native forward request uses correct OneBot action and preserves nodes', async () => {
+  const nodes = [{ type: 'node', data: { user_id: 10001, nickname: 'Alice', content: 'hello' } }];
+  const contents = [{ type: 'forward', data: '【Alice】\nhello', nodes, fallback: [{ type: 'text', data: '【Alice】\nhello' }] }];
+  const groupRequest = getNativeForwardRequest(contents, { isPrivate: false, groupId: '20001' });
+  const privateRequest = getNativeForwardRequest(contents, { isPrivate: true, userId: '10001' });
+  const calls = [];
+  const client = {
+    send: async request => {
+      calls.push(request);
+
+      return { status: 'ok', data: { message_id: 666 } };
+    }
+  };
+
+  assert.deepEqual(groupRequest, {
+    action: 'send_group_forward_msg',
+    params: { group_id: 20001, messages: nodes }
+  });
+  assert.deepEqual(privateRequest, {
+    action: 'send_private_forward_msg',
+    params: { user_id: 10001, messages: nodes }
+  });
+  assert.equal(getNativeForwardRequest([...contents, { type: 'text', data: 'extra' }], { isPrivate: false, groupId: 20001 }), null);
+
+  const result = await sendNativeForward(client, groupRequest);
+
+  assert.deepEqual(calls, [groupRequest]);
+  assert.equal(getReplyMessageId(result), '666');
+});
+
+test('quoted messages use native OneBot send actions and expand quoted forwards safely', () => {
+  const quote = [{ type: 'text', data: 'pong', quoteMessageId: '777' }];
+  const groupRequest = getNativeOneBotRequest(quote, { isPrivate: false, groupId: 20001 });
+  const privateRequest = getNativeOneBotRequest(quote, { isPrivate: true, userId: 10001 });
+  const forward = buildForwardMsgCompat([{ user_id: 10001, nickname: 'Alice', message: 'hello' }]);
+  const quotedForward = getNativeOneBotRequest([
+    {
+      type: 'forward',
+      data: forward.data,
+      nodes: forward.__forwardNodes,
+      fallback: [{ type: 'text', data: '【Alice】\nhello\n' }],
+      quoteMessageId: '888'
+    }
+  ], { isPrivate: false, groupId: 20001 });
+
+  assert.deepEqual(groupRequest, {
+    action: 'send_group_msg',
+    params: {
+      group_id: 20001,
+      message: [{ type: 'reply', data: { id: '777' } }, { type: 'text', data: { text: 'pong' } }]
+    }
+  });
+  assert.deepEqual(privateRequest, {
+    action: 'send_private_msg',
+    params: {
+      user_id: 10001,
+      message: [{ type: 'reply', data: { id: '777' } }, { type: 'text', data: { text: 'pong' } }]
+    }
+  });
+  assert.deepEqual(quotedForward, {
+    action: 'send_group_msg',
+    params: {
+      group_id: 20001,
+      message: [{ type: 'reply', data: { id: '888' } }, { type: 'text', data: { text: '【Alice】\nhello\n' } }]
+    }
+  });
+});
+
+test('standard OneBot messages preserve structured segments and media parameters', () => {
+  const contents = [
+    { type: 'text', data: 'hello ' },
+    { type: 'at', data: '10001' },
+    { type: 'image', data: 'aGVsbG8=', params: { cache: 0, proxy: true, timeout: 30 } },
+    { type: 'record', data: 'https://example.com/voice.mp3', params: { magic: true } },
+    { type: 'json', data: '{"app":"com.tencent.structmsg"}' },
+    { type: 'xml', data: '<msg>hello</msg>' }
+  ];
+
+  assert.deepEqual(getNativeMessageRequest(contents, { isPrivate: false, groupId: 20001 }), {
+    action: 'send_group_msg',
+    params: {
+      group_id: 20001,
+      message: [
+        { type: 'text', data: { text: 'hello ' } },
+        { type: 'at', data: { qq: '10001' } },
+        { type: 'image', data: { cache: 0, proxy: true, timeout: 30, file: 'base64://aGVsbG8=' } },
+        { type: 'record', data: { magic: true, file: 'https://example.com/voice.mp3' } },
+        { type: 'json', data: { data: '{"app":"com.tencent.structmsg"}' } },
+        { type: 'xml', data: { data: '<msg>hello</msg>' } }
+      ]
+    }
+  });
+  assert.equal(getNativeMessageRequest([{ type: 'other', data: 'unknown' }], { isPrivate: false, groupId: 20001 }), null);
+});
+
+test('only explicit unsupported OneBot errors are eligible for forward fallback', () => {
+  assert.equal(isUnsupportedOneBotActionError(new Error('unsupported action: send_group_forward_msg')), true);
+  assert.equal(isUnsupportedOneBotActionError(new Error('参数不支持')), true);
+  assert.equal(isUnsupportedOneBotActionError(new Error('request timed out')), false);
+  assert.equal(isUnsupportedOneBotActionError(new Error('socket disconnected')), false);
+  assert.throws(() => assertOneBotActionSucceeded({ status: 'failed', retcode: 1404, wording: 'unsupported action' }), /unsupported action/);
 });
 
 test('bot adapter normalizes friend and group caches', async () => {
@@ -179,6 +341,66 @@ test('group and friend adapters expose icqq-like methods', async () => {
   assert.ok(apiCalls.some(call => call.action === 'getPrivateFileUrl'));
 });
 
+test('group and member proxies keep cached properties consistent after mutations', async () => {
+  const { runtime, apiCalls } = createRuntimeMock({
+    api: {
+      getGroupInfo: {
+        data: { group_id: 20001, group_name: 'RemoteGroup', member_count: 42, max_member_count: 500 }
+      },
+      getGroupMemberList: {
+        data: [{ user_id: 10001, nickname: 'Alice', card: 'OldCard', role: 'member' }]
+      },
+      setGroupCard: {},
+      setGroupAdmin: {},
+      setGroupBan: {},
+      setGroupName: {},
+      setGroupWholeBan: {},
+      setGroupKick: {}
+    }
+  });
+  const botState = {
+    nickname: 'Bot',
+    tiny_id: '',
+    avatar: '',
+    fl: new Map(),
+    gl: new Map(),
+    gml: new Map(),
+    stat: {},
+    uin: 123456
+  };
+
+  runtime.createOneBotBotAdapter(botState);
+  const group = runtime.createOneBotGroupAdapter(20001, { name: 'FallbackGroup' });
+
+  assert.equal(group.name, 'FallbackGroup');
+  await group.getInfo();
+  assert.equal(group.group_name, 'RemoteGroup');
+  assert.equal(group.member_count, 42);
+
+  await group.getMemberMap();
+  const member = group.pickMember(10001);
+  assert.equal(member.card, 'OldCard');
+
+  await member.setCard('NewCard');
+  await member.setAdmin(true);
+  await member.mute(60);
+
+  assert.equal(member.card, 'NewCard');
+  assert.equal(member.remark, 'NewCard');
+  assert.equal(member.role, 'admin');
+  assert.equal(member.is_admin, true);
+  assert.ok(member.mute_left > 0);
+
+  await group.setName('RenamedGroup');
+  await group.muteAll(true);
+  assert.equal(group.name, 'RenamedGroup');
+  assert.equal(group.all_muted, true);
+
+  await group.kickMember(10001);
+  assert.equal(group.pickMember(10001).card, '');
+  assert.ok(apiCalls.some(call => call.action === 'setGroupKick' && call.params.user_id === 10001));
+});
+
 test('friend adapter reflects refreshed Bot.fl cache instead of stale snapshot', async () => {
   const { runtime } = createRuntimeMock({
     api: {
@@ -258,6 +480,8 @@ test('buildOneBotEvent builds group message event with reply and forward support
   assert.equal(event.hasReply, true);
   assert.equal(event.source.seq, 666);
   assert.equal(event.member.role, 'admin');
+  assert.equal(typeof event.member.setCard, 'function');
+  assert.equal(event.member.group.group_id, 20001);
   assert.equal(event.isMaster, true);
   assert.equal(event.toString(), '[CQ:at,qq=123456]hello');
 
@@ -352,6 +576,7 @@ test('buildOneBotEvent builds notice event with group member context', () => {
   assert.equal(event.group.group_id, 20001);
   assert.equal(event.friend.user_id, 10003);
   assert.equal(event.member.card, 'CarolCard');
+  assert.equal(typeof event.member.renew, 'function');
   assert.equal(event.sender.nickname, 'Carol');
 });
 

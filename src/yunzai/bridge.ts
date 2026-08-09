@@ -10,6 +10,8 @@
 import { EventsEnum, Format, logger, Next, sendToChannel, sendToUser, useClient, useGuild, useMe, useMember, useMessage, useRequest, useUser } from 'alemonjs';
 import { manager } from './manager';
 import type { IPCApiRequest, IPCDone, IPCMedia, IPCReply, ReplyContent } from './protocol';
+import { getNativeOneBotRequest, getReplyMessageId, isUnsupportedOneBotActionError, sendNativeForward } from './forward';
+import type { NativeForwardTarget } from './forward';
 
 /**
  * 尝试获取 OneBot 平台的原生 API 客户端
@@ -121,21 +123,8 @@ function bindReplyListener(): void {
           const sendFn = reply.isPrivate ? () => sendToUser(targetUser, format.value) : () => sendToChannel(targetChannel, format.value);
 
           void sendFn()
-            .then((res: any) => {
-              manager.sendToWorker({
-                type: 'reply_result',
-                replyId: reply.replyId,
-                messageId: res?.MessageId ?? res?.message_id ?? undefined,
-                ok: true
-              });
-            })
-            .catch(() => {
-              manager.sendToWorker({
-                type: 'reply_result',
-                replyId: reply.replyId,
-                ok: false
-              });
-            });
+            .then(res => sendReplyResult(reply, true, res))
+            .catch(() => sendReplyResult(reply, false));
         } else {
           logger.warn(`[bridge] pending/msgEvents 均未找到且无路由信息 id=${reply.id}`);
           manager.sendToWorker({
@@ -153,27 +142,109 @@ function bindReplyListener(): void {
     clearTimeout(ctx.timer);
     ctx.timer = setTimeout(() => cleanPending(reply.id), REPLY_IDLE_TIMEOUT);
 
-    const format = contentsToFormat(reply.contents);
-
     // 发送消息并将真实 message_id 回传给 Worker（用于撤回等操作）
-    void ctx.message
-      .send({ format })
-      .then((res: any) => {
-        manager.sendToWorker({
-          type: 'reply_result',
-          replyId: reply.replyId,
-          messageId: res?.MessageId ?? res?.message_id ?? undefined,
-          ok: true
-        });
-      })
-      .catch(() => {
-        manager.sendToWorker({
-          type: 'reply_result',
-          replyId: reply.replyId,
-          ok: false
-        });
-      });
+    // OneBot 原生合并转发需要由精确关联的事件客户端发出，普通内容仍走 AlemonJS Format。
+    void sendReplyWithContext(reply, ctx, msgEvents.get(reply.id));
   });
+}
+
+function sendReplyResult(reply: IPCReply, ok: boolean, result?: any): void {
+  manager.sendToWorker({
+    type: 'reply_result',
+    replyId: reply.replyId,
+    messageId: ok ? getReplyMessageId(result) : undefined,
+    ok
+  });
+}
+
+function getNativeForwardTarget(event: EventsEnum, reply: IPCReply): NativeForwardTarget {
+  const raw = (event as any).value;
+
+  return {
+    isPrivate: reply.isPrivate ?? !event.GuildId,
+    groupId: raw?.group_id ?? reply.channelId ?? event.GuildId ?? event.ChannelId,
+    userId: raw?.user_id ?? reply.userId ?? event.UserId
+  };
+}
+
+type NativeDispatchResult = { handled: false } | { handled: true; result: any };
+
+/**
+ * 原生 OneBot 消息仅能使用精确关联事件的客户端；无上下文时回退到跨平台发送，
+ * 绝不借用“最近事件”执行原生动作。
+ */
+async function trySendNativeOneBot(event: EventsEnum | undefined, contents: ReplyContent[], target: NativeForwardTarget): Promise<NativeDispatchResult> {
+  if (!event || !isOneBotPlatform(event.Platform)) {
+    return { handled: false };
+  }
+
+  const request = getNativeOneBotRequest(contents, target);
+
+  if (!request) {
+    return { handled: false };
+  }
+
+  await loadOneBotClient();
+  const client = getOneBotClient(event);
+
+  if (!client) {
+    return { handled: false };
+  }
+
+  try {
+    return { handled: true, result: await sendNativeForward(client, request) };
+  } catch (err: any) {
+    if (isUnsupportedOneBotActionError(err)) {
+      logger.warn(`[bridge] OneBot 不支持 ${request.action}，已降级为普通消息: ${err?.message ?? String(err)}`);
+
+      return { handled: false };
+    }
+
+    // 超时、连接中断等情况下无法确认服务端是否已发送，不能再降级以免重复消息。
+    logger.error(`[bridge] OneBot 原生消息发送结果不确定，未降级: ${err?.message ?? String(err)}`);
+    throw err;
+  }
+}
+
+async function sendDirectContents(contents: ReplyContent[], target: NativeForwardTarget, event?: EventsEnum): Promise<any> {
+  const native = await trySendNativeOneBot(event, contents, target);
+
+  if (native.handled) {
+    return native.result;
+  }
+
+  const format = contentsToFormat(contents);
+
+  return target.isPrivate ? sendToUser(String(target.userId), format.value) : sendToChannel(String(target.groupId), format.value);
+}
+
+async function sendReplyWithContext(reply: IPCReply, ctx: { message: ReturnType<typeof useMessage>[0] }, event?: EventsEnum): Promise<void> {
+  try {
+    const native = await trySendNativeOneBot(
+      event,
+      reply.contents,
+      event
+        ? getNativeForwardTarget(event, reply)
+        : {
+            isPrivate: reply.isPrivate ?? true,
+            groupId: reply.channelId,
+            userId: reply.userId
+          }
+    );
+
+    if (native.handled) {
+      sendReplyResult(reply, true, native.result);
+
+      return;
+    }
+
+    const format = contentsToFormat(reply.contents);
+    const result = await ctx.message.send({ format });
+
+    sendReplyResult(reply, true, result);
+  } catch {
+    sendReplyResult(reply, false);
+  }
 }
 
 /** 清理 pending 条目及其所有定时器 */
@@ -246,10 +317,7 @@ function bindExitListener(): void {
 
 // ━━━━━━━━━━━ ReplyContent → Format 转换 ━━━━━━━━━━━
 
-/** 将 Worker 的 ReplyContent[] 转为 AlemonJS Format */
-function contentsToFormat(contents: ReplyContent[]): InstanceType<typeof Format> {
-  const format = Format.create();
-
+function appendContentsToFormat(format: InstanceType<typeof Format>, contents: ReplyContent[]): void {
   for (const c of contents) {
     switch (c.type) {
       case 'text':
@@ -284,13 +352,27 @@ function contentsToFormat(contents: ReplyContent[]): InstanceType<typeof Format>
         }
         break;
       case 'forward':
-        // 转发消息降级：展示为文本（真实转发卡片在多数平台不支持）
-        format.addText(c.data || '[转发消息]');
+        // 非 OneBot、原生 API 不可用或混合消息时，使用 Worker 提供的完整展平内容。
+        if (c.fallback?.length) {
+          appendContentsToFormat(format, c.fallback);
+        } else {
+          format.addText(c.data || '[转发消息]');
+        }
+        break;
+      case 'quote':
+        // 引用是消息级元数据；非 OneBot fallback 保留正文但不伪造引用。
         break;
       default:
         format.addText(c.data);
     }
   }
+}
+
+/** 将 Worker 的 ReplyContent[] 转为 AlemonJS Format */
+function contentsToFormat(contents: ReplyContent[]): InstanceType<typeof Format> {
+  const format = Format.create();
+
+  appendContentsToFormat(format, contents);
 
   return format;
 }
@@ -302,14 +384,6 @@ function contentsToFormat(contents: ReplyContent[]): InstanceType<typeof Format>
  * Worker 发起 API 请求时携带 msgId，优先从此 Map 查找
  */
 const msgEvents = new Map<string, EventsEnum>();
-
-/**
- * 每个平台最近的 AlemonJS 事件引用（fallback）
- * 仅在 msgId 查找失败时（如定时任务触发）使用
- * 带 TTL：超过 10 分钟未更新的平台事件视为过期，避免引用已断开连接的平台
- */
-const LATEST_EVENT_TTL = 10 * 60_000; // 10 分钟
-const latestEvents = new Map<string, { event: EventsEnum; time: number }>();
 
 let apiListenerBound = false;
 
@@ -350,32 +424,26 @@ async function handleApiRequest(req: IPCApiRequest, msgId?: string): Promise<voi
 /**
  * API 分发器 — 将 Yunzai/icqq 风格的 API 调用映射到 AlemonJS 标准 hooks
  *
- * 优先使用 sendToChannel / sendToUser（无需事件上下文）
- * 成员操作等需要事件上下文的，从 latestEvents 获取
+ * 普通消息可跨平台直发；管理与 OneBot 原生动作必须拥有精确 msgId 上下文。
  */
 async function dispatchApi(action: string, params: Record<string, any>, msgId?: string): Promise<any> {
-  // 覆盖 getEventForApi，优先使用 msgId 精确关联的事件
-  const getEvent = (platform?: string) => getEventForApi(platform, msgId);
+  const getEvent = (_platform?: string) => getEventForApi(msgId);
 
   switch (action) {
     // ─── 消息发送（不需要事件上下文） ───
 
     case 'sendGroupMsg': {
-      const format = contentsToFormat(params.contents ?? []);
-
-      return await sendToChannel(String(params.group_id), format.value);
+      return await sendDirectContents(params.contents ?? [], { isPrivate: false, groupId: params.group_id }, getEvent());
     }
 
     case 'sendPrivateMsg': {
-      const format = contentsToFormat(params.contents ?? []);
-
-      return await sendToUser(String(params.user_id), format.value);
+      return await sendDirectContents(params.contents ?? [], { isPrivate: true, userId: params.user_id }, getEvent());
     }
 
     // ─── 消息操作（需要事件上下文） ───
 
     case 'deleteMsg': {
-      const event = getEvent(params.platform);
+      const event = getEvent();
 
       if (!event) {
         throw new Error('无可用事件上下文');
@@ -762,34 +830,9 @@ async function dispatchApi(action: string, params: Record<string, any>, msgId?: 
   }
 }
 
-/** 获取指定平台的事件上下文，优先按 msgId 精确匹配 */
-function getEventForApi(platform?: string, msgId?: string): EventsEnum | undefined {
-  // 优先按 msgId 精确查找（避免同平台并发消息上下文错乱）
-  if (msgId && msgEvents.has(msgId)) {
-    return msgEvents.get(msgId);
-  }
-
-  const now = Date.now();
-
-  // fallback: 按平台取最新事件（定时任务等无 msgId 场景）
-  if (platform && latestEvents.has(platform)) {
-    const entry = latestEvents.get(platform)!;
-
-    if (now - entry.time < LATEST_EVENT_TTL) {
-      return entry.event;
-    }
-    // 超过 TTL → 移除过期条目
-    latestEvents.delete(platform);
-  }
-  // 兆底: 取任意一个未过期的可用事件
-  for (const [key, entry] of latestEvents) {
-    if (now - entry.time < LATEST_EVENT_TTL) {
-      return entry.event;
-    }
-    latestEvents.delete(key);
-  }
-
-  return undefined;
+/** 仅返回 IPC msgId 精确关联的事件，禁止后台任务借用最近事件。 */
+function getEventForApi(msgId?: string): EventsEnum | undefined {
+  return msgId ? msgEvents.get(msgId) : undefined;
 }
 
 /** 从 AlemonJS 事件中提取跨平台媒体附件 */
@@ -881,11 +924,6 @@ export default (e: EventsEnum, next: Next) => {
   bindDoneListener();
   bindApiRequestListener();
   bindExitListener();
-
-  // 存储最新事件（供 Worker API 调用时使用，带时间戳用于 TTL 过期）
-  if (e.Platform) {
-    latestEvents.set(e.Platform, { event: e, time: Date.now() });
-  }
 
   const id = `msg_${++idCounter}_${Date.now()}`;
 

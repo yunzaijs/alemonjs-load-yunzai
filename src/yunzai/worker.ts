@@ -13,6 +13,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { IPCApiResponse, IPCEventMessage, IPCReplyResult, ParentToWorker, ReplyContent } from './protocol';
 import { createOneBotRuntime, isOneBotPlatform } from './adapters/onebot-icqq';
+import { buildForwardMsgCompat, buildForwardMsgParts } from './forward';
+import { getExecutionContextForAction, runWithExecutionContext } from './execution-context';
 
 // ━━━━━━━━━━━━━━━ IPC 通信 ━━━━━━━━━━━━━━━
 
@@ -30,15 +32,6 @@ function log(level: string, ...args: string[]): void {
 // eslint-disable-next-line func-call-spacing
 const apiPending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void }>();
 let apiIdCounter = 0;
-
-/** 当前正在处理的事件平台（用于 API 调用路由） */
-let currentPlatform = '';
-
-/** 当前正在处理的消息 ID（用于 API 调用精确关联事件上下文） */
-let currentMsgId = '';
-
-/** 历史已知平台（定时任务触发时 currentPlatform 可能为空，使用此 fallback） */
-let defaultPlatform = '';
 
 // ━━━━━━━━━━━━━━━ Reply 结果追踪 ━━━━━━━━━━━━━━━
 
@@ -63,12 +56,20 @@ function handleReplyResult(msg: IPCReplyResult): void {
  * Worker 的 Bot / group / friend 代理对象通过此函数实现真实功能
  */
 function callApi(action: string, params: Record<string, any> = {}, timeout = 15_000): Promise<any> {
+  let context;
+
+  try {
+    context = getExecutionContextForAction(action);
+  } catch (err) {
+    return Promise.reject(err);
+  }
+
   return new Promise((resolve, reject) => {
     const reqId = `api_${++apiIdCounter}_${Date.now()}`;
+    const requestParams = { ...params };
 
-    // 自动附加当前平台信息（定时任务触发时用 defaultPlatform 兜底）
-    if (!params.platform && (currentPlatform || defaultPlatform)) {
-      params.platform = currentPlatform || defaultPlatform;
+    if (!requestParams.platform && context?.platform) {
+      requestParams.platform = context.platform;
     }
 
     const timer = setTimeout(() => {
@@ -89,7 +90,7 @@ function callApi(action: string, params: Record<string, any> = {}, timeout = 15_
       }
     });
 
-    ipcSend({ type: 'api', reqId, action, params, msgId: currentMsgId || undefined });
+    ipcSend({ type: 'api', reqId, action, params: requestParams, msgId: context?.msgId });
   });
 }
 
@@ -785,62 +786,6 @@ function injectGlobals(): void {
 
 // ━━━━━━━━━━━━━━━ 合并转发消息构建 ━━━━━━━━━━━━━━━
 
-/**
- * 将转发消息节点展平为普通消息段数组
- * 无法创建真实 QQ 转发卡片时 → 展平为文本+媒体消息
- */
-function buildForwardMsgParts(nodes: any[]): any[] {
-  if (!Array.isArray(nodes) || nodes.length === 0) {
-    return [];
-  }
-  const parts: any[] = [];
-
-  for (const node of nodes) {
-    const msg = node.message ?? node;
-    const nickname = node.nickname ?? '';
-
-    if (nickname) {
-      parts.push({ type: 'text', text: `【${nickname}】\n` });
-    }
-    if (typeof msg === 'string') {
-      parts.push({ type: 'text', text: msg + '\n' });
-    } else if (Array.isArray(msg)) {
-      parts.push(...msg);
-      parts.push({ type: 'text', text: '\n' });
-    } else if (msg && typeof msg === 'object') {
-      parts.push(msg);
-      parts.push({ type: 'text', text: '\n' });
-    }
-  }
-
-  return parts;
-}
-
-function buildForwardMsgCompat(nodes: any[]) {
-  const parts = buildForwardMsgParts(nodes);
-  const text = parts
-    .map(part => {
-      if (part?.type === 'text') {
-        return String(part.text ?? part.data?.text ?? '');
-      }
-
-      return '';
-    })
-    .join('');
-
-  return {
-    type: 'forward',
-    data: text,
-    file: '',
-    id: '',
-    resid: '',
-    message: parts,
-    messages: parts,
-    __forwardParts: parts,
-    toString: () => text
-  };
-}
-
 const oneBotRuntime = createOneBotRuntime({
   callApi,
   serializeReply,
@@ -852,7 +797,43 @@ const oneBotRuntime = createOneBotRuntime({
 
 // ━━━━━━━━━━━━━━━ 消息序列化 ━━━━━━━━━━━━━━━
 
-async function serializeReply(msg: any): Promise<ReplyContent[]> {
+function normalizeReplyContents(contents: ReplyContent[]): ReplyContent[] {
+  const quote = contents.find(content => content.type === 'quote')?.data;
+  const body = contents.filter(content => content.type !== 'quote');
+
+  if (!quote) {
+    return body;
+  }
+
+  if (body.length === 0) {
+    return [{ type: 'text', data: '', quoteMessageId: quote }];
+  }
+
+  return [{ ...body[0], quoteMessageId: body[0].quoteMessageId ?? quote }, ...body.slice(1)];
+}
+
+function addQuote(contents: ReplyContent[], messageId?: string): ReplyContent[] {
+  if (!messageId || contents.some(content => content.quoteMessageId)) {
+    return contents;
+  }
+
+  if (contents.length === 0) {
+    return [{ type: 'text', data: '', quoteMessageId: messageId }];
+  }
+
+  return [{ ...contents[0], quoteMessageId: messageId }, ...contents.slice(1)];
+}
+
+function pickSegmentParams(msg: any, keys: string[]): ReplyContent['params'] | undefined {
+  const source = msg?.data && typeof msg.data === 'object' ? msg.data : msg;
+  const params = Object.fromEntries(
+    keys.map(key => [key, source?.[key]]).filter(([, value]) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
+  );
+
+  return Object.keys(params).length > 0 ? params : undefined;
+}
+
+async function serializeReplyContent(msg: any): Promise<ReplyContent[]> {
   if (typeof msg === 'string') {
     return [{ type: 'text', data: msg }];
   }
@@ -860,13 +841,25 @@ async function serializeReply(msg: any): Promise<ReplyContent[]> {
     return [{ type: 'image', data: msg.toString('base64') }];
   }
   if (Array.isArray(msg)) {
-    const results = await Promise.all(msg.map(serializeReply));
+    const results = await Promise.all(msg.map(serializeReplyContent));
 
     return results.flat();
   }
   if (msg && typeof msg === 'object') {
+    if (Array.isArray(msg.__forwardNodes)) {
+      const fallback = normalizeReplyContents(await serializeReplyContent(msg.__forwardParts ?? buildForwardMsgParts(msg.__forwardNodes)));
+
+      return [
+        {
+          type: 'forward',
+          data: String(msg.data ?? msg.toString?.() ?? ''),
+          nodes: msg.__forwardNodes,
+          fallback
+        }
+      ];
+    }
     if (Array.isArray(msg.__forwardParts)) {
-      return serializeReply(msg.__forwardParts);
+      return serializeReplyContent(msg.__forwardParts);
     }
 
     switch (msg.type) {
@@ -902,7 +895,7 @@ async function serializeReply(msg: any): Promise<ReplyContent[]> {
           }
         }
 
-        return [{ type: 'image', data: file }];
+        return [{ type: 'image', data: file, params: pickSegmentParams(msg, ['cache', 'proxy', 'timeout', 'type', 'subType', 'summary']) }];
       }
       case 'at':
         return [{ type: 'at', data: String(msg.qq ?? msg.data?.qq ?? '') }];
@@ -913,27 +906,31 @@ async function serializeReply(msg: any): Promise<ReplyContent[]> {
       case 'record': {
         const rf = Buffer.isBuffer(msg.file) ? msg.file.toString('base64') : String(msg.file ?? '');
 
-        return [{ type: 'record', data: rf }];
+        return [{ type: 'record', data: rf, params: pickSegmentParams(msg, ['cache', 'proxy', 'timeout', 'magic']) }];
       }
       case 'video': {
         const vf = Buffer.isBuffer(msg.file) ? msg.file.toString('base64') : String(msg.file ?? '');
 
-        return [{ type: 'video', data: vf }];
+        return [{ type: 'video', data: vf, params: pickSegmentParams(msg, ['cache', 'proxy', 'timeout']) }];
       }
       case 'json':
-        return [{ type: 'text', data: typeof msg.data === 'string' ? msg.data : JSON.stringify(msg.data) }];
+        return [{ type: 'json', data: typeof msg.data === 'string' ? msg.data : JSON.stringify(msg.data) }];
       case 'xml':
-        return [{ type: 'text', data: msg.data ?? '' }];
+        return [{ type: 'xml', data: msg.data ?? '' }];
       case 'share':
         return [{ type: 'text', data: `${msg.title ?? ''} ${msg.url ?? ''}` }];
       case 'reply':
-        return []; // 引用回复不作为内容发送
+        return [{ type: 'quote', data: String(msg.id ?? msg.data?.id ?? '') }];
       default:
         return [{ type: 'other', data: JSON.stringify(msg) }];
     }
   }
 
   return [{ type: 'text', data: String(msg) }];
+}
+
+async function serializeReply(msg: any): Promise<ReplyContent[]> {
+  return normalizeReplyContents(await serializeReplyContent(msg));
 }
 
 // ━━━━━━━━━━━━━━━ 构建 icqq 事件 ━━━━━━━━━━━━━━━
@@ -1189,8 +1186,8 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
   }
 
   // ── IPC 回复函数（始终覆盖，所有平台通用） ──
-  const reply = async (msg: any, _quote = false) => {
-    const contents = await serializeReply(msg);
+  const reply = async (msg: any, quote = false) => {
+    const contents = addQuote(await serializeReply(msg), quote ? String(raw?.message_id ?? data.messageId ?? '') : undefined);
     const replyId = `r_${++replyIdCounter}_${Date.now()}`;
 
     // 统计发送的消息数
@@ -1592,28 +1589,21 @@ async function main(): Promise<void> {
   // 6. 监听父进程 IPC 消息
   process.on('message', (msg: ParentToWorker) => {
     if (msg.type === 'event') {
-      // 记录当前事件的平台和消息 ID，供 callApi 自动附加
-      currentPlatform = msg.data.platform ?? '';
-      currentMsgId = msg.id;
-      // 记录默认平台（定时任务触发时用此兜底）
-      if (currentPlatform) {
-        defaultPlatform = currentPlatform;
-      }
-      // 统计收到的消息数
-      if ((globalThis as any).Bot?.stat) {
-        (globalThis as any).Bot.stat.recv_msg_cnt++;
-      }
+      void runWithExecutionContext({ msgId: msg.id, platform: msg.data.platform ?? '' }, async () => {
+        // 统计收到的消息数
+        if ((globalThis as any).Bot?.stat) {
+          (globalThis as any).Bot.stat.recv_msg_cnt++;
+        }
 
-      const e = buildEvent(msg.data, msg.id);
-      let replied = false;
-      const origReply = e.reply;
+        const e = buildEvent(msg.data, msg.id);
+        let replied = false;
+        const origReply = e.reply;
 
-      e.reply = (m: any, q = false) => {
-        replied = true;
+        e.reply = (m: any, q = false) => {
+          replied = true;
 
-        return origReply(m, q);
-      };
-      void (async () => {
+          return origReply(m, q);
+        };
         try {
           // 在 Bot 上发射 icqq 风格事件（供 Bot.on 监听器使用）
           emitBotEvent(e);

@@ -161,7 +161,15 @@ export type WorkerToParent = IPCReady | IPCReply | IPCError | IPCLog | IPCDone |
 
 /** 序列化后的回复内容 */
 export interface ReplyContent {
-  type: 'text' | 'image' | 'at' | 'face' | 'forward' | 'record' | 'video' | 'other';
+  type: 'text' | 'image' | 'at' | 'face' | 'forward' | 'record' | 'video' | 'json' | 'xml' | 'quote' | 'other';
   /** 文本内容 / base64 图片 / 文件路径 / JSON 数据 */
   data: string;
+  /** 原始合并转发节点，仅 OneBot 原生合并转发发送时使用 */
+  nodes?: any[];
+  /** 原生转发不可用时使用的普通消息段 */
+  fallback?: ReplyContent[];
+  /** 引用的原消息 ID；属于整条输出消息的元数据 */
+  quoteMessageId?: string;
+  /** 原生 OneBot 段的可选参数（如图片缓存、代理、超时设置） */
+  params?: Record<string, string | number | boolean>;
 }
