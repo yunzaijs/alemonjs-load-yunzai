@@ -39,11 +39,11 @@
   "devDependencies": {
     "@alemonjs/db": "^0.0.17",
     "@alemonjs/onebot": "^2.1.21",
-    "@alemonjs/qq-bot": "^2.1.32",
+    "@alemonjs/qq-bot": "^2.1.33",
     "@eslint/js": "^9.18.0",
     "@types/koa-bodyparser": "^4.3.13",
     "@types/koa-router": "^7.4.9",
-    "alemonjs": "^2.1.95",
+    "alemonjs": "^2.1.96",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react": "^7.37.3",

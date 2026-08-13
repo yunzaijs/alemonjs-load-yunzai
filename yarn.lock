@@ -2,14 +2,6 @@
 # yarn lockfile v1
 
 
-"@alemonjs/bubble@^2.1.13":
-  version "2.1.13"
-  resolved "https://registry.npmmirror.com/@alemonjs/bubble/-/bubble-2.1.13.tgz#9cc08d3d9ee22c107a962a36a74c274d06c2dd6f"
-  integrity sha512-8LRR94lYWi6bGkpmfuu+/cLrWlNGZfjifnbtCBdu7pi0jKRxZWaMJly9TDmxp3KXs8eQ8LRvPTfCiPlYZ6QZ7A==
-  dependencies:
-    http-proxy-agent "^7.0.2"
-    https-proxy-agent "^7"
-
 "@alemonjs/db@^0.0.17":
   version "0.0.17"
   resolved "https://registry.npmmirror.com/@alemonjs/db/-/db-0.0.17.tgz#0718fc4b89fe4e2069394486550fbb542b1bbe66"
@@ -19,14 +11,6 @@
     ioredis "^5.4.1"
     sequelize "^6.33.0"
 
-"@alemonjs/discord@^2.1.25":
-  version "2.1.25"
-  resolved "https://registry.npmmirror.com/@alemonjs/discord/-/discord-2.1.25.tgz#c625ebdb51f21c54000fa46abe8ed8c89903e599"
-  integrity sha512-BfFxXoQr97/XMuCcf5PaYXtMI6fblTAXhtLqoQpYRI8YVmqoo+BrYQ5JVbmA0z6cYGFh0bEtAtWFsEatA8przg==
-  dependencies:
-    http-proxy-agent "^7.0.2"
-    https-proxy-agent "^7"
-
 "@alemonjs/onebot@^2.1.21":
   version "2.1.21"
   resolved "https://registry.npmmirror.com/@alemonjs/onebot/-/onebot-2.1.21.tgz#b31fda3c578bf2a7892f5eccf5b3aadba96e18ea"
@@ -35,10 +19,10 @@
     dayjs "^1.11.13"
     ws "^8.18.1"
 
-"@alemonjs/qq-bot@^2.1.32":
-  version "2.1.32"
-  resolved "https://registry.npmmirror.com/@alemonjs/qq-bot/-/qq-bot-2.1.32.tgz#b60e98e3ae4d631c4b7539dda906c4df15eff178"
-  integrity sha512-xGmHzJcOqWHmcqb9fSNGYxhESL8nXIOVaH6mIZzzd9vnOR8Gq0G1Kw/e4FrV6ZjXFRW7tdG+zWZf98GsF0d1Eg==
+"@alemonjs/qq-bot@^2.1.33":
+  version "2.1.33"
+  resolved "https://registry.npmmirror.com/@alemonjs/qq-bot/-/qq-bot-2.1.33.tgz#8838ebe7a16a0445ab81b2adc4feb0ed0afe90fc"
+  integrity sha512-SRDbFK96cTeKu3qiAewMyQdthOss3QZGO4tX/N58bQVlP5P7T+zusZFUV3FXDVPS99IDqrRCLE2LVC22ElLarQ==
   dependencies:
     "@noble/curves" "^1.7.0"
     axios "^1.4.0"
@@ -1082,10 +1066,10 @@ ajv@^6.14.0:
     json-schema-traverse "^0.4.1"
     uri-js "^4.2.2"
 
-alemonjs@^2.1.95:
-  version "2.1.95"
-  resolved "https://registry.npmmirror.com/alemonjs/-/alemonjs-2.1.95.tgz#708a6ab64fc0a09ddfb6d50c31f65d281bc42a15"
-  integrity sha512-nyh45BjERJc+exrYBIX2nE+p+vqLUu+7qmjN2WwkEQWN8ZWcdOOVKIBelaT03+m5HSW3tw2maHKfLRdt7iVxZQ==
+alemonjs@^2.1.96:
+  version "2.1.96"
+  resolved "https://registry.npmmirror.com/alemonjs/-/alemonjs-2.1.96.tgz#91b44bb177d4bf5a6b95ecea21afbb782bc9373a"
+  integrity sha512-r+XCNRAViAplr/BqJQIodBCILwLg2PTbceR7+nCOrxD36r/ITzE0qohcxvrNTLYLFSQYtKZSok9P9V1lNL99cg==
   dependencies:
     "@koa/cors" "^5.0.0"
     axios "^1.14.0"
@@ -3106,7 +3090,7 @@ http-errors@~1.6.2:
     setprototypeof "1.1.0"
     statuses ">= 1.4.0 < 2"
 
-http-proxy-agent@^7.0.0, http-proxy-agent@^7.0.1, http-proxy-agent@^7.0.2:
+http-proxy-agent@^7.0.0, http-proxy-agent@^7.0.1:
   version "7.0.2"
   resolved "https://registry.npmmirror.com/http-proxy-agent/-/http-proxy-agent-7.0.2.tgz#9a8b1f246866c028509486585f62b8f2c18c270e"
   integrity sha512-T1gkAiYYDWYx3V5Bmyu7HcfcvL7mUrTWiM6yOfa3PIphViJ/gFPbvidQ+veqSOHci/PxBcDabeUNCzpOODJZig==
@@ -3130,7 +3114,7 @@ https-proxy-agent@^5.0.1:
     agent-base "6"
     debug "4"
 
-https-proxy-agent@^7, https-proxy-agent@^7.0.6:
+https-proxy-agent@^7.0.6:
   version "7.0.6"
   resolved "https://registry.npmmirror.com/https-proxy-agent/-/https-proxy-agent-7.0.6.tgz#da8dfeac7da130b05c2ba4b59c9b6cd66611a6b9"
   integrity sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==
