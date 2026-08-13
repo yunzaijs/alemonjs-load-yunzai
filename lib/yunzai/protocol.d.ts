@@ -81,6 +81,10 @@ export interface IPCApiRequest {
 }
 export type WorkerToParent = IPCReady | IPCReply | IPCError | IPCLog | IPCDone | IPCApiRequest;
 export interface ReplyContent {
-    type: 'text' | 'image' | 'at' | 'face' | 'forward' | 'record' | 'video' | 'other';
+    type: 'text' | 'image' | 'at' | 'face' | 'forward' | 'record' | 'video' | 'json' | 'xml' | 'quote' | 'other';
     data: string;
+    nodes?: any[];
+    fallback?: ReplyContent[];
+    quoteMessageId?: string;
+    params?: Record<string, string | number | boolean>;
 }
