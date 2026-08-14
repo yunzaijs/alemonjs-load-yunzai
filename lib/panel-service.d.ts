@@ -124,4 +124,8 @@ export declare function getRepositoryArchiveData(): import("./yunzai/repository-
 export declare function uploadRepositoryArchive(target: RepositoryArchiveTarget, filePath: string, originalName: string): import("./yunzai/repository-archive").RepositoryArchiveStatus;
 export declare function unpackRepositoryArchive(target: RepositoryArchiveTarget): Promise<import("./yunzai/repository-archive").RepositoryArchiveStatus>;
 export declare function repairRepositoryArchiveSource(target: RepositoryArchiveTarget, repoUrl: string): Promise<import("./yunzai/repository-archive").RepositoryArchiveStatus>;
+export declare function getDataBackupList(): import("./yunzai/data-backup").DataBackupItem[];
+export declare function backupYunzaiData(): import("./yunzai/data-backup").DataBackupItem;
+export declare function uploadDataBackup(filePath: string, originalName: string): import("./yunzai/data-backup").DataBackupItem;
+export declare function restoreYunzaiDataBackup(id: string): Promise<import("./yunzai/data-backup").DataBackupItem>;
 export {};
