@@ -1,5 +1,13 @@
 import { Button, HeaderDiv, Input, PrimaryDiv, SecondaryDiv, TagDiv, Tooltip } from '@alemonjs/react-ui';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  extractRepositoryArchive,
+  getRepositoryArchiveStatuses,
+  repairRepositoryArchiveOrigin,
+  type RepositoryArchiveStatus,
+  type RepositoryArchiveTarget,
+  uploadRepositoryArchive
+} from '../api/web-api';
 
 interface PluginEntry {
   key: string;
@@ -16,6 +24,12 @@ const INITIAL = {
   bot_name: '',
   yunzai_repo: '',
   miao_plugin_repo: ''
+};
+
+const MAX_REPOSITORY_ARCHIVE_SIZE_MB = 512;
+const ARCHIVE_TARGETS: Record<RepositoryArchiveTarget, { label: string; description: string }> = {
+  yunzai: { label: 'Yunzai', description: '解压到 Yunzai 根目录' },
+  miao: { label: 'Miao', description: '解压到 plugins/miao-plugin' }
 };
 
 type RepoData = typeof INITIAL;
@@ -67,7 +81,13 @@ export default function Repo({ section }: { section: string }) {
   const [plugins, setPlugins] = useState<PluginEntry[]>([]);
   const [saved, setSaved] = useState(false);
   const [message, setMessage] = useState('');
-  const [repoTab, setRepoTab] = useState<'yunzai' | 'miao'>('yunzai');
+  const [repoTab, setRepoTab] = useState<RepositoryArchiveTarget>('yunzai');
+  const [archiveStatuses, setArchiveStatuses] = useState<RepositoryArchiveStatus[]>([]);
+  const [archiveFile, setArchiveFile] = useState<File | null>(null);
+  const [archiveLoading, setArchiveLoading] = useState('');
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [isArchiveDragActive, setIsArchiveDragActive] = useState(false);
+  const archiveInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!window.API || isDesktopRuntime) {
@@ -117,6 +137,34 @@ export default function Repo({ section }: { section: string }) {
     };
   }, [isDesktopRuntime]);
 
+  const refreshArchiveStatuses = async () => {
+    if (isDesktopRuntime) {
+      return;
+    }
+
+    try {
+      setArchiveStatuses(await getRepositoryArchiveStatuses());
+    } catch (err: any) {
+      setMessage(err?.message ?? '无法读取压缩包状态');
+    }
+  };
+
+  useEffect(() => {
+    void refreshArchiveStatuses();
+  }, [isDesktopRuntime]);
+
+  useEffect(() => {
+    const preventBrowserDrop = (event: DragEvent) => event.preventDefault();
+
+    window.addEventListener('dragover', preventBrowserDrop);
+    window.addEventListener('drop', preventBrowserDrop);
+
+    return () => {
+      window.removeEventListener('dragover', preventBrowserDrop);
+      window.removeEventListener('drop', preventBrowserDrop);
+    };
+  }, []);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
   };
@@ -155,11 +203,108 @@ export default function Repo({ section }: { section: string }) {
     setTimeout(() => setSaved(false), 2000);
   };
 
+  const currentArchiveStatus = archiveStatuses.find(item => item.target === repoTab) ?? {
+    target: repoTab,
+    archive: null,
+    extracted: false,
+    extractedAt: null
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024 * 1024) {
+      return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+    }
+
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  };
+
+  const formatTime = (timestamp: number | null) => (timestamp ? new Date(timestamp).toLocaleString() : '—');
+
+  const uploadArchiveFile = async (file: File) => {
+    if (archiveLoading) {
+      return;
+    }
+
+    setArchiveFile(file);
+    setArchiveLoading('upload');
+    setUploadProgress(0);
+    try {
+      await uploadRepositoryArchive(repoTab, file, setUploadProgress);
+      setMessage(`${ARCHIVE_TARGETS[repoTab].label} 压缩包已保存，旧压缩包已覆盖`);
+      await refreshArchiveStatuses();
+    } catch (err: any) {
+      setMessage(err?.message ?? '压缩包上传失败');
+    } finally {
+      setArchiveLoading('');
+      setUploadProgress(null);
+      setArchiveFile(null);
+      if (archiveInputRef.current) {
+        archiveInputRef.current.value = '';
+      }
+    }
+  };
+
+  const selectArchiveFile = (file: File | null) => {
+    if (!file) {
+      return;
+    }
+    if (!/\.zip$/i.test(file.name)) {
+      setMessage('仅支持上传 .zip 压缩包');
+
+      return;
+    }
+    if (file.size > MAX_REPOSITORY_ARCHIVE_SIZE_MB * 1024 * 1024) {
+      setMessage(`压缩包过大，当前最大支持 ${MAX_REPOSITORY_ARCHIVE_SIZE_MB}MB`);
+
+      return;
+    }
+
+    setMessage('');
+    void uploadArchiveFile(file);
+  };
+
+  const handleArchiveExtract = async () => {
+    if (!currentArchiveStatus.archive || archiveLoading) {
+      return;
+    }
+
+    setArchiveLoading('extract');
+    try {
+      await extractRepositoryArchive(repoTab);
+      setMessage(`${ARCHIVE_TARGETS[repoTab].label} 压缩包解压完成`);
+      await refreshArchiveStatuses();
+    } catch (err: any) {
+      setMessage(err?.message ?? '压缩包解压失败');
+    } finally {
+      setArchiveLoading('');
+    }
+  };
+
+  const handleRepairArchiveOrigin = async () => {
+    const repoUrl = (repoTab === 'yunzai' ? formData.yunzai_repo : formData.miao_plugin_repo).trim();
+
+    if (!repoUrl) {
+      setMessage('请先填写 Git 仓库地址');
+
+      return;
+    }
+
+    setArchiveLoading('repair');
+    try {
+      await repairRepositoryArchiveOrigin(repoTab, repoUrl);
+      setMessage(`${ARCHIVE_TARGETS[repoTab].label} 仓库来源已修复，不会覆盖当前解压文件`);
+    } catch (err: any) {
+      setMessage(err?.message ?? '仓库来源修复失败');
+    } finally {
+      setArchiveLoading('');
+    }
+  };
+
   if (isDesktopRuntime) {
     return (
       <div className='py-2'>
         <PrimaryDiv className='rounded-xl px-4 py-3 text-[12px]' style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.16)' }}>
-          当前 desktop 链路仅同步机器人状态，不提供仓库配置读取或保存。
+          当前 desktop 链路仅同步机器人状态，不提供仓库配置或压缩包管理。
         </PrimaryDiv>
       </div>
     );
@@ -204,46 +349,165 @@ export default function Repo({ section }: { section: string }) {
         <SecondaryDiv className='rounded-xl overflow-hidden'>
           <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>
             <div className='flex items-center gap-2'>
-              <span className='text-sm font-semibold'>📦 仓库地址</span>
-              <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>Git</TagDiv>
+              <span className='text-sm font-semibold'>📦 仓库</span>
+              <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>Git + ZIP</TagDiv>
             </div>
             <SaveBtn saved={saved} />
           </HeaderDiv>
           <PrimaryDiv className='px-4 py-3 space-y-3'>
             <div className='flex items-center gap-2'>
               <TabBtn active={repoTab === 'yunzai'} onClick={() => setRepoTab('yunzai')}>
-                Yunzai 仓库
+                Yunzai
               </TabBtn>
               <TabBtn active={repoTab === 'miao'} onClick={() => setRepoTab('miao')}>
-                Miao 插件仓库
+                Miao
               </TabBtn>
             </div>
 
-            {repoTab === 'yunzai' && (
-              <div className='space-y-2'>
-                <div className='text-[11px] opacity-40'>主仓库地址</div>
-                <Input
-                  name='yunzai_repo'
-                  value={formData.yunzai_repo}
-                  placeholder='https://github.com/.../Miao-Yunzai.git'
-                  onChange={handleChange}
-                  className='w-full px-3 py-1.5 text-sm rounded-lg'
-                />
+            <div className='rounded-xl border border-current/10 px-3 py-3 space-y-2'>
+              <div className='flex flex-wrap items-center justify-between gap-2'>
+                <div className='text-sm font-semibold'>Git 仓库配置</div>
+                <Button
+                  type='button'
+                  className='px-2.5 py-1 rounded-lg text-[11px] font-medium'
+                  onClick={() => void handleRepairArchiveOrigin()}
+                  disabled={!!archiveLoading}
+                  title='为已解压目录初始化 Git 并设置 origin，不会拉取或覆盖当前文件'
+                >
+                  {archiveLoading === 'repair' ? '修复中...' : '修复仓库来源'}
+                </Button>
               </div>
-            )}
+              {repoTab === 'yunzai' ? (
+                <>
+                  <div>
+                    <div className='text-[11px] opacity-45 mb-1'>Yunzai 仓库地址</div>
+                    <Input
+                      name='yunzai_repo'
+                      value={formData.yunzai_repo}
+                      placeholder='https://github.com/.../Miao-Yunzai.git'
+                      onChange={handleChange}
+                      className='w-full px-3 py-1.5 text-sm rounded-lg'
+                    />
+                  </div>
+                  <div>
+                    <div className='text-[11px] opacity-45 mb-1'>机器人目录名</div>
+                    <Input
+                      name='bot_name'
+                      value={formData.bot_name}
+                      placeholder='Miao-Yunzai'
+                      onChange={handleChange}
+                      className='w-full px-3 py-1.5 text-sm rounded-lg'
+                    />
+                    <div className='text-[10px] opacity-35 mt-1'>控制本地 Yunzai 文件夹名称；ZIP 解压也会使用此目录。</div>
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <div className='text-[11px] opacity-45 mb-1'>Miao 插件仓库地址</div>
+                  <Input
+                    name='miao_plugin_repo'
+                    value={formData.miao_plugin_repo}
+                    placeholder='https://github.com/.../miao-plugin.git'
+                    onChange={handleChange}
+                    className='w-full px-3 py-1.5 text-sm rounded-lg'
+                  />
+                </div>
+              )}
+            </div>
 
-            {repoTab === 'miao' && (
-              <div className='space-y-2'>
-                <div className='text-[11px] opacity-40'>默认插件仓库地址</div>
-                <Input
-                  name='miao_plugin_repo'
-                  value={formData.miao_plugin_repo}
-                  placeholder='https://github.com/.../miao-plugin.git'
-                  onChange={handleChange}
-                  className='w-full px-3 py-1.5 text-sm rounded-lg'
-                />
+            <div className='rounded-xl border border-current/10 px-3 py-3 space-y-3'>
+              <div>
+                <div className='text-sm font-semibold'>{ARCHIVE_TARGETS[repoTab].label} 压缩包</div>
+                <div className='text-[11px] opacity-45 mt-0.5'>{ARCHIVE_TARGETS[repoTab].description}；支持反复解压覆盖已有文件。</div>
               </div>
-            )}
+
+              <input
+                ref={archiveInputRef}
+                type='file'
+                accept='.zip,application/zip,application/x-zip-compressed'
+                className='sr-only'
+                onChange={event => selectArchiveFile(event.target.files?.[0] ?? null)}
+              />
+              <div
+                role='button'
+                tabIndex={0}
+                className={`block rounded-lg border border-dashed px-3 py-4 text-center cursor-pointer transition-opacity ${isArchiveDragActive ? 'border-current opacity-100' : 'border-current/20 hover:opacity-80'}`}
+                onClick={() => archiveInputRef.current?.click()}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    archiveInputRef.current?.click();
+                  }
+                }}
+                onDragEnter={event => {
+                  event.preventDefault();
+                  setIsArchiveDragActive(true);
+                }}
+                onDragOver={event => event.preventDefault()}
+                onDragLeave={event => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                    setIsArchiveDragActive(false);
+                  }
+                }}
+                onDrop={event => {
+                  event.preventDefault();
+                  setIsArchiveDragActive(false);
+                  selectArchiveFile(event.dataTransfer.files?.[0] ?? null);
+                }}
+              >
+                <div className='text-sm font-medium'>
+                  {archiveLoading === 'upload'
+                    ? `正在上传 ${archiveFile?.name ?? ''}`
+                    : isArchiveDragActive
+                      ? '松开以立即上传 ZIP 压缩包'
+                      : `选择或拖入 ${ARCHIVE_TARGETS[repoTab].label} ZIP 压缩包`}
+                </div>
+                <div className='text-[11px] opacity-45 mt-1'>选择或拖入后会立即上传；最大 {MAX_REPOSITORY_ARCHIVE_SIZE_MB}MB，同类型上传会覆盖已保存压缩包</div>
+              </div>
+
+              <div className='flex flex-wrap items-center gap-2'>
+                {currentArchiveStatus.archive && (
+                  <Button
+                    type='button'
+                    className='px-3 py-1.5 rounded-lg text-xs font-semibold'
+                    onClick={() => void handleArchiveExtract()}
+                    disabled={!!archiveLoading}
+                  >
+                    {archiveLoading === 'extract' ? '解压中...' : currentArchiveStatus.extracted ? '重新解压' : '解压压缩包'}
+                  </Button>
+                )}
+              </div>
+
+              {uploadProgress !== null && (
+                <div className='space-y-1'>
+                  <div className='flex justify-between text-[11px] opacity-60'>
+                    <span>上传中</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className='h-1.5 rounded-full overflow-hidden bg-current/10' aria-label={`上传进度 ${uploadProgress}%`}>
+                    <div
+                      className='h-full rounded-full transition-[width] duration-150'
+                      style={{ width: `${uploadProgress}%`, background: 'var(--alemonjs-primary-bg, currentColor)' }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {currentArchiveStatus.archive ? (
+                <div className='rounded-lg px-3 py-2 text-[11px] space-y-1' style={{ background: 'var(--alemonjs-primary-bg, rgba(128,128,128,.08))' }}>
+                  <div className='flex flex-wrap gap-x-3 gap-y-1'>
+                    <span>已保存：{currentArchiveStatus.archive.name}</span>
+                    <span className='opacity-50'>{formatSize(currentArchiveStatus.archive.size)}</span>
+                    <span className='opacity-50'>上传于 {formatTime(currentArchiveStatus.archive.uploadedAt)}</span>
+                  </div>
+                  <div className={currentArchiveStatus.extracted ? 'text-emerald-500' : 'text-amber-500'}>
+                    {currentArchiveStatus.extracted ? `✓ 已完成解压（${formatTime(currentArchiveStatus.extractedAt)}）` : '○ 尚未解压当前压缩包'}
+                  </div>
+                </div>
+              ) : (
+                <div className='text-[11px] opacity-45'>尚未保存压缩包。上传完成后将显示解压按钮与状态。</div>
+              )}
+            </div>
           </PrimaryDiv>
         </SecondaryDiv>
       )}
@@ -260,15 +524,6 @@ export default function Repo({ section }: { section: string }) {
                 name='gh_proxy'
                 value={formData.gh_proxy}
                 placeholder='https://ghfast.top/'
-                onChange={handleChange}
-                className='w-full px-3 py-1.5 text-sm rounded-lg'
-              />
-            </Row>
-            <Row label='目录名' tip='本地 Yunzai 目录名称'>
-              <Input
-                name='bot_name'
-                value={formData.bot_name}
-                placeholder='Miao-Yunzai'
                 onChange={handleChange}
                 className='w-full px-3 py-1.5 text-sm rounded-lg'
               />

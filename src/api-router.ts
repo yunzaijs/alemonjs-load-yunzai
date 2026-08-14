@@ -7,11 +7,15 @@ import { PACKAGE_ROOT } from './path';
 import {
   getLogViewerData,
   getRepoData,
+  getRepositoryArchiveData,
   getStatusData,
   getYunzaiFormData,
+  repairRepositoryArchiveSource,
   runYunzaiAction,
   saveRepoData,
   saveYunzaiFormData,
+  unpackRepositoryArchive,
+  uploadRepositoryArchive,
   uploadYunzaiPluginArchive
 } from './panel-service';
 
@@ -96,6 +100,41 @@ apiRouter.post('/repo', ctx => {
     message: '仓库配置保存成功～',
     data: null
   };
+});
+
+apiRouter.get('/repo/archives', ctx => {
+  ctx.status = 200;
+  ctx.body = {
+    code: 200,
+    message: 'ok',
+    data: getRepositoryArchiveData()
+  };
+});
+
+apiRouter.post('/repo/archive-extract', async ctx => {
+  try {
+    const target = (ctx.request as { body?: Record<string, unknown> }).body?.target;
+    const data = await unpackRepositoryArchive(target as 'yunzai' | 'miao');
+
+    ctx.status = 200;
+    ctx.body = { code: 200, message: '压缩包解压完成', data };
+  } catch (err: any) {
+    ctx.status = 400;
+    ctx.body = { code: 400, message: err?.message ?? '压缩包解压失败', data: null };
+  }
+});
+
+apiRouter.post('/repo/archive-repair-origin', async ctx => {
+  try {
+    const body = (ctx.request as { body?: Record<string, unknown> }).body ?? {};
+    const data = await repairRepositoryArchiveSource(body.target as 'yunzai' | 'miao', String(body.repoUrl ?? ''));
+
+    ctx.status = 200;
+    ctx.body = { code: 200, message: '仓库来源已修复', data };
+  } catch (err: any) {
+    ctx.status = 400;
+    ctx.body = { code: 400, message: err?.message ?? '仓库来源修复失败', data: null };
+  }
 });
 
 apiRouter.get('/yunzai/config', ctx => {
@@ -222,6 +261,48 @@ apiRouter.post('/yunzai/plugin-upload', async ctx => {
       message: err?.message ?? '插件上传失败',
       data: null
     };
+  } finally {
+    try {
+      rmSync(uploadedFile.path, { force: true });
+    } catch {}
+    cleanupUploadDir();
+  }
+});
+
+apiRouter.post('/repo/archive-upload', async ctx => {
+  try {
+    await runSingleUpload(ctx);
+  } catch (err: any) {
+    const isFileTooLarge = err?.code === 'LIMIT_FILE_SIZE';
+
+    ctx.status = isFileTooLarge ? 413 : 400;
+    ctx.body = {
+      code: ctx.status,
+      message: isFileTooLarge ? `上传文件过大，当前最大支持 ${Math.floor(PLUGIN_UPLOAD_MAX_BYTES / 1024 / 1024)}MB` : (err?.message ?? '上传文件解析失败'),
+      data: null
+    };
+
+    return;
+  }
+
+  const uploadedFile = (ctx.request as { file?: { path: string; originalname?: string } }).file;
+  const target = (ctx.request as { body?: Record<string, unknown> }).body?.target;
+
+  if (!uploadedFile?.path || !uploadedFile.originalname) {
+    ctx.status = 400;
+    ctx.body = { code: 400, message: '缺少上传文件', data: null };
+
+    return;
+  }
+
+  try {
+    const data = uploadRepositoryArchive(target as 'yunzai' | 'miao', uploadedFile.path, uploadedFile.originalname);
+
+    ctx.status = 200;
+    ctx.body = { code: 200, message: '压缩包已保存；重新上传会覆盖当前压缩包', data };
+  } catch (err: any) {
+    ctx.status = 400;
+    ctx.body = { code: 400, message: err?.message ?? '压缩包上传失败', data: null };
   } finally {
     try {
       rmSync(uploadedFile.path, { force: true });

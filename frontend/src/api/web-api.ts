@@ -47,6 +47,57 @@ async function callApi(path: string, method: 'GET' | 'POST', data?: unknown) {
   }
 }
 
+export type RepositoryArchiveTarget = 'yunzai' | 'miao';
+
+export type RepositoryArchiveStatus = {
+  target: RepositoryArchiveTarget;
+  archive: { name: string; size: number; uploadedAt: number } | null;
+  extracted: boolean;
+  extractedAt: number | null;
+};
+
+export async function getRepositoryArchiveStatuses(): Promise<RepositoryArchiveStatus[]> {
+  const json = await callApi('/repo/archives', 'GET');
+
+  return Array.isArray(json?.data) ? json.data : [];
+}
+
+export async function uploadRepositoryArchive(
+  target: RepositoryArchiveTarget,
+  file: File,
+  onProgress?: (progress: number) => void
+): Promise<RepositoryArchiveStatus> {
+  const formData = new FormData();
+
+  formData.append('target', target);
+  formData.append('file', file);
+  try {
+    const response = await axios.post('./api/repo/archive-upload', formData, {
+      onUploadProgress: event => {
+        if (event.total) {
+          onProgress?.(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+        }
+      }
+    });
+
+    return response.data?.data;
+  } catch (error: any) {
+    throw new Error(error?.response?.data?.message ?? error?.message ?? '上传失败');
+  }
+}
+
+export async function extractRepositoryArchive(target: RepositoryArchiveTarget): Promise<RepositoryArchiveStatus> {
+  const json = await callApi('/repo/archive-extract', 'POST', { target });
+
+  return json?.data;
+}
+
+export async function repairRepositoryArchiveOrigin(target: RepositoryArchiveTarget, repoUrl: string): Promise<RepositoryArchiveStatus> {
+  const json = await callApi('/repo/archive-repair-origin', 'POST', { target, repoUrl });
+
+  return json?.data;
+}
+
 export async function uploadPluginArchive(file: File, dirName?: string) {
   const formData = new FormData();
 

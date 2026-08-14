@@ -21,14 +21,13 @@ const CONFIG_SECTIONS = [
 ];
 
 const REPO_SECTIONS = [
-  { key: 'auth', label: '🔑 主人认证', short: '🔑 认证' },
-  { key: 'gitrepo', label: '📦 仓库地址', short: '📦 仓库' },
   { key: 'network', label: '🌐 网络配置', short: '🌐 网络' },
   { key: 'plugins', label: '🧩 插件来源', short: '🧩 来源' }
 ];
 
 const CONFIG_KEYS = new Set(CONFIG_SECTIONS.map(s => s.key));
-const REPO_KEYS = new Set(REPO_SECTIONS.map(s => s.key));
+// “仓库”是独立页面，不属于下面的仓库配置子分类；两者都需要渲染 Repo。
+const REPO_PAGE_KEYS = new Set(['gitrepo', ...REPO_SECTIONS.map(s => s.key)]);
 
 function NavItem({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
@@ -74,7 +73,7 @@ export default function AppLayout() {
   const repoMatch = location.pathname.match(/^\/repo\/([^/]+)$/);
   const activeKey = configMatch?.[1] ?? repoMatch?.[1] ?? (location.pathname === '/plugin' ? 'plugin' : location.pathname === '/logs' ? 'logs' : 'manage');
   const isConfig = CONFIG_KEYS.has(activeKey);
-  const isRepo = REPO_KEYS.has(activeKey);
+  const isRepo = REPO_PAGE_KEYS.has(activeKey);
   const go = (path: string) => {
     void navigate(path);
   };
@@ -110,15 +109,34 @@ export default function AppLayout() {
           </div>
         </div>
 
-        <NavItem active={activeKey === 'manage'} onClick={() => go('/manage')}>
-          ⚡ 管理
-        </NavItem>
-        <NavItem active={activeKey === 'plugin'} onClick={() => go('/plugin')}>
-          🔌 插件
-        </NavItem>
-        <NavItem active={activeKey === 'logs'} onClick={() => go('/logs')}>
-          📜 日志
-        </NavItem>
+        {[
+          {
+            label: '⚡ 管理',
+            activeKey: 'manage',
+            path: '/manage'
+          },
+          {
+            label: '📜 日志',
+            activeKey: 'logs',
+            path: '/logs'
+          },
+          {
+            label: '🔌 插件',
+            activeKey: 'plugin',
+            path: '/plugin'
+          },
+          {
+            label: '📦 仓库',
+            activeKey: 'gitrepo',
+            path: '/repo/gitrepo'
+          }
+        ].map(item => {
+          return (
+            <NavItem key={item.activeKey} active={activeKey === item.activeKey} onClick={() => go(item.path)}>
+              {item.label}
+            </NavItem>
+          );
+        })}
 
         <div className='text-[10px] uppercase tracking-wider opacity-25 font-medium px-3 pt-4 pb-1'>仓库配置</div>
         {REPO_SECTIONS.map(s => (
@@ -167,7 +185,7 @@ export default function AppLayout() {
               active={isRepo}
               onClick={() => {
                 if (!isRepo) {
-                  go('/repo/auth');
+                  go('/repo/gitrepo');
                 }
               }}
             >

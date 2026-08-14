@@ -4,6 +4,13 @@ import { join } from 'path';
 import YAML from 'yaml';
 import { getGhProxy, getYunzaiDir } from './path';
 import { executeYunzaiActionLocal, getStatusSnapshotLocal, installPluginArchiveLocal } from './yunzai/control';
+import {
+  extractRepositoryArchive,
+  getAllRepositoryArchiveStatuses,
+  repairRepositoryArchiveOrigin,
+  saveRepositoryArchive,
+  type RepositoryArchiveTarget
+} from './yunzai/repository-archive';
 
 type PrimitiveRecord = Record<string, unknown>;
 
@@ -517,4 +524,20 @@ export function runYunzaiAction(data: PrimitiveRecord) {
 
 export function uploadYunzaiPluginArchive(filePath: string, options?: { dirName?: string; originalName?: string }) {
   return installPluginArchiveLocal(filePath, options);
+}
+
+export function getRepositoryArchiveData() {
+  return getAllRepositoryArchiveStatuses();
+}
+
+export function uploadRepositoryArchive(target: RepositoryArchiveTarget, filePath: string, originalName: string) {
+  return saveRepositoryArchive(target, filePath, originalName);
+}
+
+export function unpackRepositoryArchive(target: RepositoryArchiveTarget) {
+  return extractRepositoryArchive(target);
+}
+
+export function repairRepositoryArchiveSource(target: RepositoryArchiveTarget, repoUrl: string) {
+  return repairRepositoryArchiveOrigin(target, repoUrl);
 }
