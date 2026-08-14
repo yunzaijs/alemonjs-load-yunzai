@@ -1,3 +1,4 @@
+import { type RepositoryArchiveTarget } from './yunzai/repository-archive';
 type PrimitiveRecord = Record<string, unknown>;
 export interface CatalogItem {
     dirName: string;
@@ -119,4 +120,8 @@ export declare function uploadYunzaiPluginArchive(filePath: string, options?: {
 }): Promise<{
     message: string;
 }>;
+export declare function getRepositoryArchiveData(): import("./yunzai/repository-archive").RepositoryArchiveStatus[];
+export declare function uploadRepositoryArchive(target: RepositoryArchiveTarget, filePath: string, originalName: string): import("./yunzai/repository-archive").RepositoryArchiveStatus;
+export declare function unpackRepositoryArchive(target: RepositoryArchiveTarget): Promise<import("./yunzai/repository-archive").RepositoryArchiveStatus>;
+export declare function repairRepositoryArchiveSource(target: RepositoryArchiveTarget, repoUrl: string): Promise<import("./yunzai/repository-archive").RepositoryArchiveStatus>;
 export {};
