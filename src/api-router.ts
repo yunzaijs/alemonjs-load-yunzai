@@ -5,6 +5,8 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { PACKAGE_ROOT } from './path';
 import {
+  backupYunzaiData,
+  getDataBackupList,
   getLogViewerData,
   getRepoData,
   getRepositoryArchiveData,
@@ -14,7 +16,9 @@ import {
   runYunzaiAction,
   saveRepoData,
   saveYunzaiFormData,
+  restoreYunzaiDataBackup,
   unpackRepositoryArchive,
+  uploadDataBackup,
   uploadRepositoryArchive,
   uploadYunzaiPluginArchive
 } from './panel-service';
@@ -134,6 +138,36 @@ apiRouter.post('/repo/archive-repair-origin', async ctx => {
   } catch (err: any) {
     ctx.status = 400;
     ctx.body = { code: 400, message: err?.message ?? '仓库来源修复失败', data: null };
+  }
+});
+
+apiRouter.get('/data/backups', ctx => {
+  ctx.status = 200;
+  ctx.body = { code: 200, message: 'ok', data: getDataBackupList() };
+});
+
+apiRouter.post('/data/backup', ctx => {
+  try {
+    const data = backupYunzaiData();
+
+    ctx.status = 200;
+    ctx.body = { code: 200, message: '数据备份已创建', data };
+  } catch (err: any) {
+    ctx.status = 400;
+    ctx.body = { code: 400, message: err?.message ?? '数据备份失败', data: null };
+  }
+});
+
+apiRouter.post('/data/restore', async ctx => {
+  try {
+    const id = (ctx.request as { body?: Record<string, unknown> }).body?.id;
+    const data = await restoreYunzaiDataBackup(String(id ?? ''));
+
+    ctx.status = 200;
+    ctx.body = { code: 200, message: '数据备份已恢复', data };
+  } catch (err: any) {
+    ctx.status = 400;
+    ctx.body = { code: 400, message: err?.message ?? '数据恢复失败', data: null };
   }
 });
 
@@ -303,6 +337,47 @@ apiRouter.post('/repo/archive-upload', async ctx => {
   } catch (err: any) {
     ctx.status = 400;
     ctx.body = { code: 400, message: err?.message ?? '压缩包上传失败', data: null };
+  } finally {
+    try {
+      rmSync(uploadedFile.path, { force: true });
+    } catch {}
+    cleanupUploadDir();
+  }
+});
+
+apiRouter.post('/data/backup-upload', async ctx => {
+  try {
+    await runSingleUpload(ctx);
+  } catch (err: any) {
+    const isFileTooLarge = err?.code === 'LIMIT_FILE_SIZE';
+
+    ctx.status = isFileTooLarge ? 413 : 400;
+    ctx.body = {
+      code: ctx.status,
+      message: isFileTooLarge ? `上传文件过大，当前最大支持 ${Math.floor(PLUGIN_UPLOAD_MAX_BYTES / 1024 / 1024)}MB` : (err?.message ?? '上传文件解析失败'),
+      data: null
+    };
+
+    return;
+  }
+
+  const uploadedFile = (ctx.request as { file?: { path: string; originalname?: string } }).file;
+
+  if (!uploadedFile?.path || !uploadedFile.originalname) {
+    ctx.status = 400;
+    ctx.body = { code: 400, message: '缺少上传文件', data: null };
+
+    return;
+  }
+
+  try {
+    const data = uploadDataBackup(uploadedFile.path, uploadedFile.originalname);
+
+    ctx.status = 200;
+    ctx.body = { code: 200, message: '数据备份已加入列表', data };
+  } catch (err: any) {
+    ctx.status = 400;
+    ctx.body = { code: 400, message: err?.message ?? '数据备份上传失败', data: null };
   } finally {
     try {
       rmSync(uploadedFile.path, { force: true });

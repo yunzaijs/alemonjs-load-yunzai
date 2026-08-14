@@ -1,6 +1,7 @@
 import { HeaderDiv, SecondaryDiv, SidebarDiv } from '@alemonjs/react-ui';
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import Data from './Data';
 import From from './From';
 import Logs from './Logs';
 import Manage from './Manage';
@@ -71,7 +72,10 @@ export default function AppLayout() {
   });
   const configMatch = location.pathname.match(/^\/config\/([^/]+)$/);
   const repoMatch = location.pathname.match(/^\/repo\/([^/]+)$/);
-  const activeKey = configMatch?.[1] ?? repoMatch?.[1] ?? (location.pathname === '/plugin' ? 'plugin' : location.pathname === '/logs' ? 'logs' : 'manage');
+  const activeKey =
+    configMatch?.[1] ??
+    repoMatch?.[1] ??
+    (location.pathname === '/plugin' ? 'plugin' : location.pathname === '/logs' ? 'logs' : location.pathname === '/data' ? 'data' : 'manage');
   const isConfig = CONFIG_KEYS.has(activeKey);
   const isRepo = REPO_PAGE_KEYS.has(activeKey);
   const go = (path: string) => {
@@ -129,6 +133,11 @@ export default function AppLayout() {
             label: '📦 仓库',
             activeKey: 'gitrepo',
             path: '/repo/gitrepo'
+          },
+          {
+            label: '💾 数据',
+            activeKey: 'data',
+            path: '/data'
           }
         ].map(item => {
           return (
@@ -191,6 +200,9 @@ export default function AppLayout() {
             >
               仓库
             </Pill>
+            <Pill active={activeKey === 'data'} onClick={() => go('/data')}>
+              数据
+            </Pill>
             <Pill
               active={isConfig}
               onClick={() => {
@@ -227,6 +239,7 @@ export default function AppLayout() {
           {activeKey === 'manage' && <Manage />}
           {activeKey === 'plugin' && <Plugin />}
           {activeKey === 'logs' && <Logs />}
+          {activeKey === 'data' && <Data />}
           {isConfig && <From section={activeKey} />}
           {isRepo && <Repo section={activeKey} />}
         </div>

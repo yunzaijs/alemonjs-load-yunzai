@@ -11,6 +11,7 @@ import {
   saveRepositoryArchive,
   type RepositoryArchiveTarget
 } from './yunzai/repository-archive';
+import { createDataBackup, getDataBackups, restoreDataBackup, saveUploadedDataBackup } from './yunzai/data-backup';
 
 type PrimitiveRecord = Record<string, unknown>;
 
@@ -540,4 +541,20 @@ export function unpackRepositoryArchive(target: RepositoryArchiveTarget) {
 
 export function repairRepositoryArchiveSource(target: RepositoryArchiveTarget, repoUrl: string) {
   return repairRepositoryArchiveOrigin(target, repoUrl);
+}
+
+export function getDataBackupList() {
+  return getDataBackups();
+}
+
+export function backupYunzaiData() {
+  return createDataBackup();
+}
+
+export function uploadDataBackup(filePath: string, originalName: string) {
+  return saveUploadedDataBackup(filePath, originalName);
+}
+
+export function restoreYunzaiDataBackup(id: string) {
+  return restoreDataBackup(id);
 }

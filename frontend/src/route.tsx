@@ -19,6 +19,10 @@ export default createHashRouter([
     element: <AppLayout />
   },
   {
+    path: '/data',
+    element: <AppLayout />
+  },
+  {
     path: '/repo/:section',
     element: <AppLayout />
   },

@@ -98,6 +98,51 @@ export async function repairRepositoryArchiveOrigin(target: RepositoryArchiveTar
   return json?.data;
 }
 
+export type DataBackupItem = {
+  id: string;
+  name: string;
+  size: number;
+  createdAt: number;
+  source: 'created' | 'uploaded';
+};
+
+export async function getDataBackups(): Promise<DataBackupItem[]> {
+  const json = await callApi('/data/backups', 'GET');
+
+  return Array.isArray(json?.data) ? json.data : [];
+}
+
+export async function createDataBackup(): Promise<DataBackupItem> {
+  const json = await callApi('/data/backup', 'POST');
+
+  return json?.data;
+}
+
+export async function restoreDataBackup(id: string): Promise<DataBackupItem> {
+  const json = await callApi('/data/restore', 'POST', { id });
+
+  return json?.data;
+}
+
+export async function uploadDataBackup(file: File, onProgress?: (progress: number) => void): Promise<DataBackupItem> {
+  const formData = new FormData();
+
+  formData.append('file', file);
+  try {
+    const response = await axios.post('./api/data/backup-upload', formData, {
+      onUploadProgress: event => {
+        if (event.total) {
+          onProgress?.(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+        }
+      }
+    });
+
+    return response.data?.data;
+  } catch (error: any) {
+    throw new Error(error?.response?.data?.message ?? error?.message ?? '上传失败');
+  }
+}
+
 export async function uploadPluginArchive(file: File, dirName?: string) {
   const formData = new FormData();
 
