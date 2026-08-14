@@ -2,26 +2,6 @@
 
 这是一个桥接层，通过进程隔离 + IPC 协议，将 Yunzai-Bot 生态无缝桥接到现代 AlemonJS 框架上，同时提供了完整的安装管理、插件管理和跨平台消息适配能力。设计上做到了与 Yunzai 运行时的完全解耦。完全不需要有重启后导致账户异常和整个机器人不再响应的心智负担，因为Yunzai是被alemonjs托管起来的
 
-- 尽可能的兼容所有效果，因此版本需要 ⚠️ `alemonjs` >= v2.1.46
-
-- 是OneBot优先的，确保最大程度上适用于所有Yunzai插件，其他平台适配情况则完全依赖于框架的通用模型
-
-<img src="./image.png">
-
-## 架构链路
-
-当前实现明确收口为两条入口链路：
-
-- `web -> api -> koa进程(机器人进程) -> Yunzai进程`
-- `webview -> 桌面主进程 -> desktop子进程 -> 机器人进程 -> Yunzai子进程`
-
-边界说明：
-
-- `koa` 与机器人控制核心同进程，Web 前端只通过 `/api` 访问，不使用文件总线。
-- `desktop` 是独立子进程，不是机器人进程本体；当前与机器人主进程的跨进程交互范围仅收口到“机器人状态”。
-- `manager` 是机器人进程内唯一的 Yunzai 控制面。
-- `worker` / `Yunzai` 为独立子进程，不直接暴露给 Web 或 desktop。
-
 ## OneBot 兼容
 
 当前兼容策略是明确的双通道：
@@ -35,57 +15,13 @@
 - 事件桥接分流: [src/yunzai/bridge.ts](./src/yunzai/bridge.ts)
 - Worker 路由与通用兜底: [src/yunzai/worker.ts](./src/yunzai/worker.ts)
 
-当前已经覆盖的兼容面：
-
-- `Bot / Friend / Group / Member`
-- `Bot[uin]`
-- 私聊 / 群聊 / `notice` / `request`
-- `makeForwardMsg`
-- `reply`
-- `source`
-- `getChatHistory`
-
-## 测试
-
-OneBot 兼容回归测试入口：
-
-```sh
-yarn test
-```
-
-当前测试资产：
-
-- 主测试: [tests/onebot-compat.test.mjs](./tests/onebot-compat.test.mjs)
-- 事件 fixture: [tests/fixtures/onebot-events.mjs](./tests/fixtures/onebot-events.mjs)
-
-新增兼容修复时，优先补对应 fixture 和断言，再改实现，避免回到“线上告警驱动散补”的方式。
-
-详细拓扑、职责和升级路径见 [docs/architecture.md](./docs/architecture.md)。
-
 ### 安装
 
-请访问官网 https://alemonjs.com 先安装 桌面/web版,
+请访问官网 https://alemonjs.com 先安装 ALemonX,
 
-或者在官网简单的了解一下一些对于该框架的基本内容
+或者在官网简单的了解一下一些对于该框架的基本内容,
 
-- 仓库地址
-
-```sh
-https://github.com/yunzaijs/alemonjs-load-yunzai.git
-```
-
-- 仓库分支
-
-```sh title="alemon.config.yaml"
-release: 123
-```
-
-- alemon.config.yaml
-
-```yaml
-apps:
-  alemonjs-load-yunzai: true # 启动扩展
-```
+在ALemonX新建机器人并找到 插件管理
 
 ## 管理指令
 
@@ -142,11 +78,3 @@ redis:
   user: root
   db: 0
 ```
-
-## 免责声明
-
-- 勿用于以盈利为目的的场景
-
-- 代码开放，无需征得特殊同意，可任意使用。能备注来源最好，但不强求
-
-- 图片与其他素材均来自于网络，仅供交流学习使用，如有侵权请联系，会立即删除
