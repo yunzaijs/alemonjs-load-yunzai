@@ -120,6 +120,10 @@ export declare function uploadYunzaiPluginArchive(filePath: string, options?: {
 }): Promise<{
     message: string;
 }>;
+export declare function getPluginArchiveData(): import("./yunzai/plugin-archive").PluginArchiveEntry[];
+export declare function uploadPluginArchive(filePath: string, originalName: string, dirName?: string): import("./yunzai/plugin-archive").PluginArchiveEntry[];
+export declare function extractPluginArchive(id: unknown): Promise<import("./yunzai/plugin-archive").PluginArchiveEntry[]>;
+export declare function deletePluginArchive(id: unknown): import("./yunzai/plugin-archive").PluginArchiveEntry[];
 export declare function getRepositoryArchiveData(): import("./yunzai/repository-archive").RepositoryArchiveStatus[];
 export declare function uploadRepositoryArchive(target: RepositoryArchiveTarget, filePath: string, originalName: string): import("./yunzai/repository-archive").RepositoryArchiveStatus;
 export declare function unpackRepositoryArchive(target: RepositoryArchiveTarget): Promise<import("./yunzai/repository-archive").RepositoryArchiveStatus>;

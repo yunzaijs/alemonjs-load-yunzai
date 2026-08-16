@@ -54,6 +54,10 @@ declare class YunzaiManager {
         dirName?: string;
         originalName?: string;
     }): Promise<PluginInfo>;
+    extractPluginArchiveFromFile(archivePath: string, options?: {
+        dirName?: string;
+        originalName?: string;
+    }): Promise<PluginInfo>;
     updatePlugin(plugin: PluginInfo, force?: boolean): Promise<string>;
     uninstallPlugin(plugin: PluginInfo): void;
     installDeps(): Promise<string>;
