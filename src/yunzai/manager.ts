@@ -850,6 +850,107 @@ class YunzaiManager {
     }
   }
 
+  /**
+   * 将已保存的插件压缩包解压安装到 plugins/ 目录。
+   * 与仓库页压缩包解压保持一致：Yunzai 运行中拒绝操作；已存在同名目录时
+   * 通过暂存 + 备份的方式安全覆盖，任一步失败都会回滚旧目录。
+   */
+  async extractPluginArchiveFromFile(archivePath: string, options?: { dirName?: string; originalName?: string }): Promise<PluginInfo> {
+    if (!this.isInstalled) {
+      throw new Error('Yunzai 未安装');
+    }
+    if (this.isRunning) {
+      throw new Error('Yunzai 正在运行，请先停止后再解压插件压缩包');
+    }
+
+    const tempRoot = mkdtempSync(join(tmpdir(), 'alemonjs-yunzai-plugin-'));
+    const extractDir = join(tempRoot, 'extract');
+    let targetDir = '';
+    let backupDir = '';
+    let movedCurrent = false;
+
+    this.beginTask('解压安装插件');
+    try {
+      mkdirSync(extractDir, { recursive: true });
+      await extractZip(archivePath, { dir: extractDir });
+      this.throwIfCancelled();
+
+      const { pluginRoot, suggestedDirName } = resolveArchivePluginRoot(extractDir);
+      const baseName = options?.dirName ?? suggestedDirName ?? options?.originalName ?? 'uploaded-plugin';
+      const dirName = sanitizePluginDirName(baseName);
+
+      if (!dirName) {
+        throw new Error('无法确定插件目录名，请重新命名 ZIP 文件后再上传');
+      }
+
+      const pluginsDir = join(getYunzaiDir(), 'plugins');
+
+      targetDir = join(pluginsDir, dirName);
+      backupDir = join(pluginsDir, `.${dirName}.archive-backup-${Date.now()}`);
+      const staging = join(pluginsDir, `.${dirName}.archive-staging-${Date.now()}`);
+
+      mkdirSync(pluginsDir, { recursive: true });
+      rmSync(staging, { recursive: true, force: true });
+
+      if (pluginRoot === extractDir) {
+        mkdirSync(staging, { recursive: true });
+
+        for (const entry of getPluginCandidateEntries(pluginRoot)) {
+          renameSync(join(pluginRoot, entry), join(staging, entry));
+        }
+      } else {
+        cpSync(pluginRoot, staging, { recursive: true });
+      }
+
+      if (existsSync(targetDir)) {
+        rmSync(backupDir, { recursive: true, force: true });
+        renameSync(targetDir, backupDir);
+        movedCurrent = true;
+      }
+
+      try {
+        renameSync(staging, targetDir);
+      } catch (err) {
+        if (movedCurrent && existsSync(backupDir)) {
+          renameSync(backupDir, targetDir);
+        }
+        throw err;
+      }
+
+      this.throwIfCancelled();
+      this.ensureWorkspaces();
+      logger.info(`[Yunzai] 正在为 ${dirName} 安装依赖...`);
+      await this.npmInstall(getYunzaiDir());
+      this.throwIfCancelled();
+
+      rmSync(backupDir, { recursive: true, force: true });
+      logger.info(`[Yunzai] ${dirName} 解压安装完成`);
+
+      return {
+        dirName,
+        repoUrl: '',
+        label: dirName
+      };
+    } catch (err) {
+      try {
+        if (backupDir && existsSync(backupDir)) {
+          // 新目录已就位或部分就位：先移除再回滚旧目录
+          rmSync(targetDir, { recursive: true, force: true });
+          renameSync(backupDir, targetDir);
+        } else if (targetDir && !movedCurrent && existsSync(targetDir)) {
+          // 全新安装失败：删除残留目录
+          rmSync(targetDir, { recursive: true, force: true });
+        }
+      } catch {}
+      throw err;
+    } finally {
+      try {
+        rmSync(tempRoot, { recursive: true, force: true });
+      } catch {}
+      this.endTask();
+    }
+  }
+
   /** 更新指定插件（git pull） */
   async updatePlugin(plugin: PluginInfo, force = false): Promise<string> {
     if (!this.isInstalled) {

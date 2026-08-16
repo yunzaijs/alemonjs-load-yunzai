@@ -4,6 +4,7 @@ import { join } from 'path';
 import YAML from 'yaml';
 import { getGhProxy, getYunzaiDir } from './path';
 import { executeYunzaiActionLocal, getStatusSnapshotLocal, installPluginArchiveLocal } from './yunzai/control';
+import { deletePluginArchiveEntry, extractPluginArchiveEntry, getPluginArchiveEntries, savePluginArchive } from './yunzai/plugin-archive';
 import {
   extractRepositoryArchive,
   getAllRepositoryArchiveStatuses,
@@ -525,6 +526,22 @@ export function runYunzaiAction(data: PrimitiveRecord) {
 
 export function uploadYunzaiPluginArchive(filePath: string, options?: { dirName?: string; originalName?: string }) {
   return installPluginArchiveLocal(filePath, options);
+}
+
+export function getPluginArchiveData() {
+  return getPluginArchiveEntries();
+}
+
+export function uploadPluginArchive(filePath: string, originalName: string, dirName?: string) {
+  return savePluginArchive(filePath, originalName, dirName);
+}
+
+export function extractPluginArchive(id: unknown) {
+  return extractPluginArchiveEntry(id);
+}
+
+export function deletePluginArchive(id: unknown) {
+  return deletePluginArchiveEntry(id);
 }
 
 export function getRepositoryArchiveData() {

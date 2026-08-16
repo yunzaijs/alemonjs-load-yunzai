@@ -2,7 +2,7 @@ import { Button, HeaderDiv, PrimaryDiv, SecondaryDiv, TagDiv } from '@alemonjs/r
 import React, { useEffect, useRef, useState } from 'react';
 import { createDataBackup, getDataBackups, restoreDataBackup, type DataBackupItem, uploadDataBackup } from '../api/web-api';
 
-const MAX_BACKUP_SIZE_MB = 512;
+const MAX_BACKUP_SIZE_MB = 2048;
 
 function formatSize(bytes: number) {
   if (bytes < 1024 * 1024) {

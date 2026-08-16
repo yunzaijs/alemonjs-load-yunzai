@@ -21,7 +21,7 @@ export type DataBackupItem = {
 };
 
 const BACKUP_DIR = join(PACKAGE_ROOT, 'runtime', 'data-backups');
-const MAX_BACKUP_BYTES = 512 * 1024 * 1024;
+const MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
 
 function dataPath(): string {
   return join(getYunzaiDir(), 'data');

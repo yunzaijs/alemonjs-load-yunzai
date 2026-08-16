@@ -1,6 +1,6 @@
 import { Button, Collapse, HeaderDiv, Input, Modal, NotificationDiv, PrimaryDiv, SecondaryDiv, TagDiv } from '@alemonjs/react-ui';
-import { useEffect, useState } from 'react';
-import { uploadPluginArchive } from '../api/web-api';
+import { useEffect, useRef, useState } from 'react';
+import { deletePluginArchiveEntry, extractPluginArchiveEntry, getPluginArchiveEntries, type PluginArchiveEntry, uploadPluginArchive } from '../api/web-api';
 import { SmartDropdown } from './SmartDropdown';
 
 interface PluginItem {
@@ -82,7 +82,7 @@ interface PluginState {
 }
 
 const ONLINE_PLUGIN_CACHE_KEY = 'alemonjs-load-yunzai:online-plugins';
-const MAX_PLUGIN_ARCHIVE_SIZE_MB = 512;
+const MAX_PLUGIN_ARCHIVE_SIZE_MB = 2048;
 
 function readOnlinePluginCache(): OnlineCatalogItem[] {
   if (typeof window === 'undefined') {
@@ -173,6 +173,16 @@ function getRecommendedGroup(dirName: string): keyof typeof RECOMMENDED_GROUP_LA
   return 'other';
 }
 
+const formatSize = (bytes: number) => {
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+};
+
+const formatTime = (timestamp: number | null) => (timestamp ? new Date(timestamp).toLocaleString() : '—');
+
 export default function Plugin() {
   const isDesktopRuntime = window.__ALEMONJS_RUNTIME_MODE__ === 'desktop';
   const cachedOnlineCatalog = readOnlinePluginCache();
@@ -189,10 +199,15 @@ export default function Plugin() {
   const [customUrl, setCustomUrl] = useState('');
   const [uploadDirName, setUploadDirName] = useState('');
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
+  const [pluginArchives, setPluginArchives] = useState<PluginArchiveEntry[]>([]);
+  const [archiveLoading, setArchiveLoading] = useState('');
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [isArchiveDragActive, setIsArchiveDragActive] = useState(false);
   const [onlineKeyword, setOnlineKeyword] = useState('');
   const [pluginTab, setPluginTab] = useState<'required' | 'installed' | 'catalog' | 'online' | 'custom'>('required');
   const [confirmAction, setConfirmAction] = useState<{ action: string; label: string; extra?: Record<string, string> } | null>(null);
   const [lastAction, setLastAction] = useState('');
+  const archiveInputRef = useRef<HTMLInputElement>(null);
 
   const showMessage = (msg: string) => {
     setMessage(msg);
@@ -272,28 +287,110 @@ export default function Plugin() {
     setCustomUrl('');
   };
 
-  const handleUploadArchive = async () => {
-    if (!archiveFile || isDesktopRuntime) {
-      return;
-    }
-    if (archiveFile.size > MAX_PLUGIN_ARCHIVE_SIZE_MB * 1024 * 1024) {
-      showMessage(`ZIP 文件过大，当前最大支持 ${MAX_PLUGIN_ARCHIVE_SIZE_MB}MB`);
-
+  const refreshPluginArchives = async () => {
+    if (isDesktopRuntime) {
       return;
     }
 
-    setLoading(`上传 ${archiveFile.name}`);
-    setLastAction('upload_plugin_zip');
     try {
-      const json = await uploadPluginArchive(archiveFile, uploadDirName);
+      setPluginArchives(await getPluginArchiveEntries());
+    } catch (err: any) {
+      showMessage(err?.message ?? '无法读取插件压缩包列表');
+    }
+  };
 
-      showMessage((json?.data as { message?: string } | undefined)?.message ?? json?.message ?? '插件上传完成');
-      setArchiveFile(null);
+  useEffect(() => {
+    void refreshPluginArchives();
+  }, [isDesktopRuntime]);
+
+  useEffect(() => {
+    const preventBrowserDrop = (event: DragEvent) => event.preventDefault();
+
+    window.addEventListener('dragover', preventBrowserDrop);
+    window.addEventListener('drop', preventBrowserDrop);
+
+    return () => {
+      window.removeEventListener('dragover', preventBrowserDrop);
+      window.removeEventListener('drop', preventBrowserDrop);
+    };
+  }, []);
+
+  const uploadArchiveFile = async (file: File) => {
+    if (archiveLoading || isDesktopRuntime) {
+      return;
+    }
+
+    setArchiveFile(file);
+    setArchiveLoading('upload');
+    setUploadProgress(0);
+    try {
+      const list = await uploadPluginArchive(file, uploadDirName, setUploadProgress);
+
+      setPluginArchives(list);
       setUploadDirName('');
+      showMessage('插件压缩包已保存，可在列表中点击「解压安装」');
+    } catch (err: any) {
+      showMessage(err?.message ?? '压缩包上传失败');
+    } finally {
+      setArchiveLoading('');
+      setUploadProgress(null);
+      setArchiveFile(null);
+      if (archiveInputRef.current) {
+        archiveInputRef.current.value = '';
+      }
+    }
+  };
+
+  const selectArchiveFile = (file: File | null) => {
+    if (!file) {
+      return;
+    }
+    if (!/\.zip$/i.test(file.name)) {
+      showMessage('仅支持上传 .zip 压缩包');
+
+      return;
+    }
+    if (file.size > MAX_PLUGIN_ARCHIVE_SIZE_MB * 1024 * 1024) {
+      showMessage(`压缩包过大，当前最大支持 ${MAX_PLUGIN_ARCHIVE_SIZE_MB}MB`);
+
+      return;
+    }
+
+    void uploadArchiveFile(file);
+  };
+
+  const handleArchiveExtract = async (id: string) => {
+    if (archiveLoading || isDesktopRuntime) {
+      return;
+    }
+
+    setArchiveLoading(id);
+    try {
+      const list = await extractPluginArchiveEntry(id);
+
+      setPluginArchives(list);
+      showMessage('插件压缩包解压安装完成');
       window.API.postMessage({ type: 'yunzai.status' });
     } catch (err: any) {
-      showMessage(err?.message ?? '插件上传失败');
-      setLoading('');
+      showMessage(err?.message ?? '插件压缩包解压失败');
+    } finally {
+      setArchiveLoading('');
+    }
+  };
+
+  const handleArchiveDelete = async (id: string) => {
+    if (archiveLoading || isDesktopRuntime) {
+      return;
+    }
+
+    setArchiveLoading(id);
+    try {
+      setPluginArchives(await deletePluginArchiveEntry(id));
+      showMessage('插件压缩包记录已删除');
+    } catch (err: any) {
+      showMessage(err?.message ?? '删除失败');
+    } finally {
+      setArchiveLoading('');
     }
   };
 
@@ -780,33 +877,128 @@ export default function Plugin() {
 
           <SecondaryDiv className='rounded-xl overflow-hidden'>
             <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>
-              <span className='text-sm font-semibold'>📦 上传 ZIP 安装</span>
-            </HeaderDiv>
-            <PrimaryDiv className='px-4 py-3 space-y-2.5'>
-              <div className='text-[11px] opacity-40'>上传 ZIP 插件包并自动解压到 `plugins/`</div>
-              <input
-                type='file'
-                accept='.zip,application/zip'
-                onChange={e => {
-                  const file = e.target.files?.[0] ?? null;
-
-                  setArchiveFile(file);
-                }}
-                className='block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:px-3 file:py-2 file:text-sm file:font-medium'
-              />
-              <Input
-                type='text'
-                value={uploadDirName}
-                onChange={e => setUploadDirName(e.target.value)}
-                placeholder='可选：指定插件目录名'
-                className='w-full px-3 py-1.5 text-sm rounded-xl'
-              />
-              <div className='text-[10px] opacity-30'>
-                如果不填写目录名，将优先使用压缩包内顶层目录名，其次使用 ZIP 文件名。当前最大支持 {MAX_PLUGIN_ARCHIVE_SIZE_MB}MB。
+              <div className='flex items-center gap-2'>
+                <span className='text-sm font-semibold'>📦 插件压缩包</span>
+                <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>{pluginArchives.length}</TagDiv>
               </div>
-              <Button className='px-4 py-1.5 rounded-xl text-sm font-medium' onClick={() => void handleUploadArchive()} disabled={isDisabled || !archiveFile}>
-                上传并安装
-              </Button>
+            </HeaderDiv>
+            <PrimaryDiv className='px-4 py-3 space-y-3'>
+              <div className='text-[11px] opacity-45'>
+                上传 ZIP 保存到压缩包列表，再点击「解压安装」写入 plugins/；支持反复解压覆盖已有文件。解压时需先停止 Yunzai。
+              </div>
+
+              <div>
+                <div className='text-[11px] opacity-45 mb-1'>目标目录名（可选）</div>
+                <Input
+                  type='text'
+                  value={uploadDirName}
+                  onChange={e => setUploadDirName(e.target.value)}
+                  placeholder='留空自动识别压缩包内插件目录'
+                  className='w-full px-3 py-1.5 text-sm rounded-lg'
+                />
+                <div className='text-[10px] opacity-35 mt-1'>不填写时，将优先使用压缩包内顶层目录名，其次使用 ZIP 文件名。</div>
+              </div>
+
+              <input
+                ref={archiveInputRef}
+                type='file'
+                accept='.zip,application/zip,application/x-zip-compressed'
+                className='sr-only'
+                onChange={event => selectArchiveFile(event.target.files?.[0] ?? null)}
+              />
+              <div
+                role='button'
+                tabIndex={0}
+                className={`block rounded-lg border border-dashed px-3 py-4 text-center cursor-pointer transition-opacity ${isArchiveDragActive ? 'border-current opacity-100' : 'border-current/20 hover:opacity-80'}`}
+                onClick={() => archiveInputRef.current?.click()}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    archiveInputRef.current?.click();
+                  }
+                }}
+                onDragEnter={event => {
+                  event.preventDefault();
+                  setIsArchiveDragActive(true);
+                }}
+                onDragOver={event => event.preventDefault()}
+                onDragLeave={event => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                    setIsArchiveDragActive(false);
+                  }
+                }}
+                onDrop={event => {
+                  event.preventDefault();
+                  setIsArchiveDragActive(false);
+                  selectArchiveFile(event.dataTransfer.files?.[0] ?? null);
+                }}
+              >
+                <div className='text-sm font-medium'>
+                  {archiveLoading === 'upload'
+                    ? `正在上传 ${archiveFile?.name ?? ''}`
+                    : isArchiveDragActive
+                      ? '松开以立即上传 ZIP 压缩包'
+                      : '选择或拖入插件 ZIP 压缩包'}
+                </div>
+                <div className='text-[11px] opacity-45 mt-1'>选择或拖入后会立即上传；最大 {MAX_PLUGIN_ARCHIVE_SIZE_MB}MB，每次上传都会追加到压缩包列表</div>
+              </div>
+
+              {uploadProgress !== null && (
+                <div className='space-y-1'>
+                  <div className='flex justify-between text-[11px] opacity-60'>
+                    <span>上传中</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className='h-1.5 rounded-full overflow-hidden bg-current/10' aria-label={`上传进度 ${uploadProgress}%`}>
+                    <div
+                      className='h-full rounded-full transition-[width] duration-150'
+                      style={{ width: `${uploadProgress}%`, background: 'var(--alemonjs-primary-bg, currentColor)' }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {pluginArchives.length === 0 ? (
+                <div className='text-[11px] opacity-45'>尚未上传插件压缩包。上传后可在列表中解压安装。</div>
+              ) : (
+                <div className='space-y-2'>
+                  {pluginArchives.map(entry => (
+                    <div
+                      key={entry.id}
+                      className='rounded-lg px-3 py-2 text-[11px] space-y-1'
+                      style={{ background: 'var(--alemonjs-primary-bg, rgba(128,128,128,.08))' }}
+                    >
+                      <div className='flex flex-wrap items-center gap-x-3 gap-y-1'>
+                        <span className='font-medium'>{entry.originalName}</span>
+                        <span className='opacity-50'>{formatSize(entry.size)}</span>
+                        <span className='opacity-50'>上传于 {formatTime(entry.uploadedAt)}</span>
+                        <span className='opacity-50'>目录: {entry.dirName || '自动识别'}</span>
+                        <div className='ml-auto flex items-center gap-1.5'>
+                          <Button
+                            type='button'
+                            className='px-2.5 py-1 rounded-lg text-[11px] font-medium'
+                            onClick={() => void handleArchiveExtract(entry.id)}
+                            disabled={!!archiveLoading || isDisabled}
+                          >
+                            {archiveLoading === entry.id ? '处理中...' : entry.extracted ? '重新解压' : '解压安装'}
+                          </Button>
+                          <Button
+                            type='button'
+                            className='px-2 py-0.5 text-[10px] rounded text-red-400'
+                            onClick={() => void handleArchiveDelete(entry.id)}
+                            disabled={!!archiveLoading}
+                          >
+                            删除
+                          </Button>
+                        </div>
+                      </div>
+                      <div className={entry.extracted ? 'text-emerald-500' : 'text-amber-500'}>
+                        {entry.extracted ? `✓ 已解压安装（${formatTime(entry.extractedAt)}）` : '○ 尚未解压'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </PrimaryDiv>
           </SecondaryDiv>
         </div>
