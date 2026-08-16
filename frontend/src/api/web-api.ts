@@ -143,7 +143,23 @@ export async function uploadDataBackup(file: File, onProgress?: (progress: numbe
   }
 }
 
-export async function uploadPluginArchive(file: File, dirName?: string) {
+export type PluginArchiveEntry = {
+  id: string;
+  originalName: string;
+  size: number;
+  uploadedAt: number;
+  dirName: string;
+  extracted: boolean;
+  extractedAt: number | null;
+};
+
+export async function getPluginArchiveEntries(): Promise<PluginArchiveEntry[]> {
+  const json = await callApi('/yunzai/plugin-archives', 'GET');
+
+  return Array.isArray(json?.data) ? json.data : [];
+}
+
+export async function uploadPluginArchive(file: File, dirName?: string, onProgress?: (progress: number) => void): Promise<PluginArchiveEntry[]> {
   const formData = new FormData();
 
   formData.append('file', file);
@@ -151,17 +167,31 @@ export async function uploadPluginArchive(file: File, dirName?: string) {
     formData.append('dirName', dirName.trim());
   }
 
-  const response = await fetch('./api/yunzai/plugin-upload', {
-    method: 'POST',
-    body: formData
-  });
-  const json = await response.json().catch(() => null);
+  try {
+    const response = await axios.post('./api/yunzai/plugin-archive-upload', formData, {
+      onUploadProgress: event => {
+        if (event.total) {
+          onProgress?.(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+        }
+      }
+    });
 
-  if (!response.ok) {
-    throw new Error(json?.message ?? '上传失败');
+    return response.data?.data ?? [];
+  } catch (error: any) {
+    throw new Error(error?.response?.data?.message ?? error?.message ?? '上传失败');
   }
+}
 
-  return json;
+export async function extractPluginArchiveEntry(id: string): Promise<PluginArchiveEntry[]> {
+  const json = await callApi('/yunzai/plugin-archive-extract', 'POST', { id });
+
+  return Array.isArray(json?.data) ? json.data : [];
+}
+
+export async function deletePluginArchiveEntry(id: string): Promise<PluginArchiveEntry[]> {
+  const json = await callApi('/yunzai/plugin-archive-delete', 'POST', { id });
+
+  return Array.isArray(json?.data) ? json.data : [];
 }
 
 export function createWebAPI(): API {

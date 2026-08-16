@@ -6,8 +6,11 @@ import { join } from 'node:path';
 import { PACKAGE_ROOT } from './path';
 import {
   backupYunzaiData,
+  deletePluginArchive,
+  extractPluginArchive,
   getDataBackupList,
   getLogViewerData,
+  getPluginArchiveData,
   getRepoData,
   getRepositoryArchiveData,
   getStatusData,
@@ -19,6 +22,7 @@ import {
   restoreYunzaiDataBackup,
   unpackRepositoryArchive,
   uploadDataBackup,
+  uploadPluginArchive,
   uploadRepositoryArchive,
   uploadYunzaiPluginArchive
 } from './panel-service';
@@ -27,7 +31,7 @@ const apiRouter = new KoaRouter({
   prefix: '/api'
 });
 const uploadDir = join(PACKAGE_ROOT, 'runtime', 'uploads');
-const PLUGIN_UPLOAD_MAX_BYTES = 512 * 1024 * 1024;
+const PLUGIN_UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024;
 const UPLOAD_FILE_TTL_MS = 6 * 60 * 60 * 1000;
 const UPLOAD_FILE_LIMIT = 20;
 
@@ -300,6 +304,126 @@ apiRouter.post('/yunzai/plugin-upload', async ctx => {
       rmSync(uploadedFile.path, { force: true });
     } catch {}
     cleanupUploadDir();
+  }
+});
+
+apiRouter.get('/yunzai/plugin-archives', ctx => {
+  ctx.status = 200;
+  ctx.body = {
+    code: 200,
+    message: 'ok',
+    data: getPluginArchiveData()
+  };
+});
+
+apiRouter.post('/yunzai/plugin-archive-upload', async ctx => {
+  try {
+    await runSingleUpload(ctx);
+  } catch (err: any) {
+    const isFileTooLarge = err?.code === 'LIMIT_FILE_SIZE';
+
+    ctx.status = isFileTooLarge ? 413 : 400;
+    ctx.body = {
+      code: ctx.status,
+      message: isFileTooLarge ? `上传文件过大，当前最大支持 ${Math.floor(PLUGIN_UPLOAD_MAX_BYTES / 1024 / 1024)}MB` : (err?.message ?? '上传文件解析失败'),
+      data: null
+    };
+
+    return;
+  }
+
+  const uploadedFile = (ctx.request as { file?: { path: string; originalname?: string; mimetype?: string } }).file;
+  const rawDirName = (ctx.request as { body?: Record<string, unknown> }).body?.dirName;
+  const dirName = typeof rawDirName === 'string' ? rawDirName : '';
+
+  if (!uploadedFile?.path || !uploadedFile.originalname) {
+    ctx.status = 400;
+    ctx.body = {
+      code: 400,
+      message: '缺少上传文件',
+      data: null
+    };
+
+    return;
+  }
+
+  if (!/\.zip$/i.test(uploadedFile.originalname)) {
+    try {
+      rmSync(uploadedFile.path, { force: true });
+    } catch {}
+    ctx.status = 400;
+    ctx.body = {
+      code: 400,
+      message: '仅支持上传 .zip 插件包',
+      data: null
+    };
+
+    return;
+  }
+
+  try {
+    const data = uploadPluginArchive(uploadedFile.path, uploadedFile.originalname, dirName);
+
+    ctx.status = 200;
+    ctx.body = {
+      code: 200,
+      message: '插件压缩包已保存',
+      data
+    };
+  } catch (err: any) {
+    ctx.status = 400;
+    ctx.body = {
+      code: 400,
+      message: err?.message ?? '插件压缩包上传失败',
+      data: null
+    };
+  } finally {
+    try {
+      rmSync(uploadedFile.path, { force: true });
+    } catch {}
+    cleanupUploadDir();
+  }
+});
+
+apiRouter.post('/yunzai/plugin-archive-extract', async ctx => {
+  try {
+    const id = (ctx.request as { body?: Record<string, unknown> }).body?.id;
+    const data = await extractPluginArchive(id);
+
+    ctx.status = 200;
+    ctx.body = {
+      code: 200,
+      message: '插件压缩包解压安装完成',
+      data
+    };
+  } catch (err: any) {
+    ctx.status = 400;
+    ctx.body = {
+      code: 400,
+      message: err?.message ?? '插件压缩包解压失败',
+      data: null
+    };
+  }
+});
+
+apiRouter.post('/yunzai/plugin-archive-delete', ctx => {
+  try {
+    const id = (ctx.request as { body?: Record<string, unknown> }).body?.id;
+    const data = deletePluginArchive(id);
+
+    ctx.status = 200;
+    ctx.body = {
+      code: 200,
+      message: '插件压缩包记录已删除',
+      data
+    };
+  } catch (err: any) {
+    ctx.status = 400;
+    ctx.body = {
+      code: 400,
+      message: err?.message ?? '插件压缩包记录删除失败',
+      data: null
+    };
   }
 });
 

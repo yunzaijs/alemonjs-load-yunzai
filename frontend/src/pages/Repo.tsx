@@ -1,4 +1,4 @@
-import { Button, HeaderDiv, Input, PrimaryDiv, SecondaryDiv, TagDiv, Tooltip } from '@alemonjs/react-ui';
+import { Button, HeaderDiv, Input, PrimaryDiv, SecondaryDiv, Select, TagDiv, Tooltip } from '@alemonjs/react-ui';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   extractRepositoryArchive,
@@ -26,11 +26,34 @@ const INITIAL = {
   miao_plugin_repo: ''
 };
 
-const MAX_REPOSITORY_ARCHIVE_SIZE_MB = 512;
+const MAX_REPOSITORY_ARCHIVE_SIZE_MB = 2048;
 const ARCHIVE_TARGETS: Record<RepositoryArchiveTarget, { label: string; description: string }> = {
   yunzai: { label: 'Yunzai', description: '解压到 Yunzai 根目录' },
   miao: { label: 'Miao', description: '解压到 plugins/miao-plugin' }
 };
+
+/** 已知 GitHub URL 前缀代理（纯前缀形式，兼容 gh_proxy 直接拼接 github.com 地址） */
+const GH_PROXY_PRESETS = [
+  { value: 'https://ghfast.top/', label: 'ghfast.top' },
+  { value: 'https://gh-proxy.com/', label: 'gh-proxy.com' },
+  { value: 'https://ghproxy.net/', label: 'ghproxy.net' },
+  { value: 'https://ghproxy.com/', label: 'ghproxy.com' },
+  { value: 'https://ghproxy.cc/', label: 'ghproxy.cc' },
+  { value: 'https://gh.llkk.cc/', label: 'gh.llkk.cc' },
+  { value: 'https://ghproxy.homeboyc.cn/', label: 'ghproxy.homeboyc.cn' },
+  { value: 'https://mirror.ghproxy.com/', label: 'mirror.ghproxy.com' },
+  { value: 'https://ghp.ci/', label: 'ghp.ci' },
+  { value: 'https://moeyy.cn/gh-proxy/', label: 'moeyy.cn/gh-proxy' },
+  { value: 'https://github.moeyy.xyz/', label: 'github.moeyy.xyz' },
+  { value: 'https://v6.gh-proxy.org/', label: 'v6.gh-proxy.org' },
+  { value: 'https://gh.api.99988866.xyz/', label: 'gh.api.99988866.xyz' },
+  { value: 'https://ghps.cc/', label: 'ghps.cc' },
+  { value: 'https://hub.gitmirror.com/', label: 'hub.gitmirror.com' },
+  { value: 'https://gh.ddlc.top/', label: 'gh.ddlc.top' },
+  { value: 'https://ghproxy.link/', label: 'ghproxy.link' }
+];
+
+const GH_PROXY_PRESET_VALUES = new Set(GH_PROXY_PRESETS.map(item => item.value));
 
 type RepoData = typeof INITIAL;
 
@@ -519,14 +542,37 @@ export default function Repo({ section }: { section: string }) {
             <SaveBtn saved={saved} />
           </HeaderDiv>
           <PrimaryDiv className='px-4 py-0.5 divide-y divide-gray-200/10'>
-            <Row label='GitHub 代理' tip='国内加速代理地址'>
-              <Input
-                name='gh_proxy'
-                value={formData.gh_proxy}
-                placeholder='https://ghfast.top/'
-                onChange={handleChange}
-                className='w-full px-3 py-1.5 text-sm rounded-lg'
-              />
+            <Row label='GitHub 代理' tip='国内加速代理前缀，GitHub 仓库克隆与在线插件索引下载都会拼接此前缀'>
+              <div className='space-y-1.5'>
+                <Select
+                  value={GH_PROXY_PRESET_VALUES.has(formData.gh_proxy) ? formData.gh_proxy : formData.gh_proxy ? 'custom' : 'none'}
+                  onChange={e => {
+                    const next = e.target.value;
+
+                    setFormData(prev => ({
+                      ...prev,
+                      gh_proxy: next === 'none' ? '' : next === 'custom' ? prev.gh_proxy : next
+                    }));
+                  }}
+                  className='w-full px-3 py-1.5 text-sm rounded-lg'
+                >
+                  <option value='none'>不使用代理</option>
+                  {GH_PROXY_PRESETS.map(item => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                  <option value='custom'>自定义…</option>
+                </Select>
+                <Input
+                  name='gh_proxy'
+                  value={formData.gh_proxy}
+                  placeholder='https://ghfast.top/'
+                  onChange={handleChange}
+                  className='w-full px-3 py-1.5 text-sm rounded-lg'
+                />
+                <div className='text-[10px] opacity-35'>从下拉选择常用代理即可生效，也可直接在输入框填写任意前缀；代理服务可用性会变化，失效时切换一个即可</div>
+              </div>
             </Row>
           </PrimaryDiv>
         </SecondaryDiv>
