@@ -11,10 +11,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { IPCApiResponse, IPCEventMessage, IPCReplyResult, ParentToWorker, ReplyContent } from './protocol';
 import { createOneBotRuntime, isOneBotPlatform } from './adapters/onebot-icqq';
-import { buildForwardMsgCompat, buildForwardMsgParts } from './forward';
 import { getExecutionContextForAction, runWithExecutionContext } from './execution-context';
+import { buildForwardMsgCompat, buildForwardMsgParts } from './forward';
+import type { IPCApiResponse, IPCEventMessage, IPCReplyResult, ParentToWorker, ReplyContent } from './protocol';
 
 // ━━━━━━━━━━━━━━━ IPC 通信 ━━━━━━━━━━━━━━━
 
@@ -1633,7 +1633,7 @@ async function main(): Promise<void> {
         }
         // 通知父进程 deal 已完成
         ipcSend({ type: 'done', id: msg.id, replied });
-      })();
+      });
     } else if (msg.type === 'api_response') {
       handleApiResponse(msg);
     } else if (msg.type === 'reply_result') {
