@@ -1,15 +1,84 @@
 {
-  "name": "alemonjs-load-yunzai",
-  "version": "1.0.6",
-  "description": "yunzai-bot",
-  "author": "ningmengchongshui",
-  "type": "module",
-  "main": "./lib/index.js",
-  "exports": {
-    ".": "./lib/index.js",
-    "./package": "./package.json",
-    "./desktop": "./lib/desktop.js"
+  "alemonjs": {
+    "config": [
+      {
+        "description": "Bot 目录名",
+        "name": "bot_name",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "description": "GitHub 代理前缀",
+        "name": "gh_proxy",
+        "required": false,
+        "rules": [
+          {
+            "message": "代理必须以http://或https://开头",
+            "pattern": "^http://|^https://"
+          },
+          {
+            "message": "代理格式不正确",
+            "pattern": "^(http|https)://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$"
+          }
+        ],
+        "type": "string"
+      },
+      {
+        "description": "Yunzai 仓库地址",
+        "name": "yunzai_repo",
+        "required": false,
+        "rules": [
+          {
+            "message": "仓库地址必须以http://或https://开头",
+            "pattern": "^http://|^https://"
+          },
+          {
+            "message": "仓库地址格式不正确",
+            "pattern": "^(http|https)://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$"
+          }
+        ],
+        "type": "string"
+      },
+      {
+        "description": "miao-plugin 仓库地址",
+        "name": "miao_plugin_repo",
+        "required": false,
+        "rules": [
+          {
+            "message": "仓库地址必须以http://或https://开头",
+            "pattern": "^http://|^https://"
+          },
+          {
+            "message": "仓库地址格式不正确",
+            "pattern": "^(http|https)://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$"
+          }
+        ],
+        "type": "string"
+      }
+    ],
+    "desktop": {
+      "command": [
+        {
+          "command": "open.yunzai",
+          "name": "yunzai"
+        }
+      ],
+      "sidebars": [
+        {
+          "command": "open.yunzai",
+          "name": "yunzai"
+        }
+      ]
+    },
+    "web": {
+      "config": {
+        "serverPort": true
+      },
+      "root": "dist"
+    }
   },
+  "author": "ningmengchongshui",
+  "bugs": "https://github.com/yunzaijs/alemonjs-load-yunzai/issues",
   "dependencies": {
     "@koa/multer": "^4.0.0",
     "classnames": "^2.5.1",
@@ -22,84 +91,15 @@
     "md5": "^2.3.0",
     "multer": "^2.0.2"
   },
-  "alemonjs": {
-    "web": {
-      "root": "dist",
-      "config": {
-        "serverPort": true
-      }
-    },
-    "config": [
-      {
-        "name": "bot_name",
-        "type": "string",
-        "required": false,
-        "description": "Bot 目录名"
-      },
-      {
-        "name": "gh_proxy",
-        "type": "string",
-        "required": false,
-        "rules": [
-          {
-            "pattern": "^http://|^https://",
-            "message": "代理必须以http://或https://开头"
-          },
-          {
-            "pattern": "^(http|https)://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$",
-            "message": "代理格式不正确"
-          }
-        ],
-        "description": "GitHub 代理前缀"
-      },
-      {
-        "name": "yunzai_repo",
-        "type": "string",
-        "required": false,
-        "rules": [
-          {
-            "pattern": "^http://|^https://",
-            "message": "仓库地址必须以http://或https://开头"
-          },
-          {
-            "pattern": "^(http|https)://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$",
-            "message": "仓库地址格式不正确"
-          }
-        ],
-        "description": "Yunzai 仓库地址"
-      },
-      {
-        "name": "miao_plugin_repo",
-        "type": "string",
-        "required": false,
-        "rules": [
-          {
-            "pattern": "^http://|^https://",
-            "message": "仓库地址必须以http://或https://开头"
-          },
-          {
-            "pattern": "^(http|https)://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$",
-            "message": "仓库地址格式不正确"
-          }
-        ],
-        "description": "miao-plugin 仓库地址"
-      }
-    ],
-    "desktop": {
-      "command": [
-        {
-          "name": "yunzai",
-          "command": "open.yunzai"
-        }
-      ],
-      "sidebars": [
-        {
-          "name": "yunzai",
-          "command": "open.yunzai"
-        }
-      ]
-    }
+  "description": "yunzai-bot",
+  "exports": {
+    ".": "./lib/index.js",
+    "./desktop": "./lib/desktop.js",
+    "./package": "./package.json"
   },
+  "keywords": [
+    "alemonjs"
+  ],
   "lint-staged": {
     "*.{js,ts,tsx}": [
       "prettier --write",
@@ -109,17 +109,17 @@
       "prettier --write"
     ]
   },
+  "main": "./lib/index.js",
+  "name": "alemonjs-load-yunzai",
   "packageManager": "yarn@1.22.22",
-  "keywords": [
-    "alemonjs"
-  ],
   "publishConfig": {
-    "registry": "https://registry.npmjs.org",
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   },
-  "bugs": "https://github.com/yunzaijs/alemonjs-load-yunzai/issues",
   "repository": {
     "type": "git",
     "url": "https://github.com/yunzaijs/alemonjs-load-yunzai.git"
-  }
+  },
+  "type": "module",
+  "version": "1.0.7"
 }
