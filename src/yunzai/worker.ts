@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createOneBotRuntime, isOneBotPlatform } from './adapters/onebot-icqq';
+import { createCompatValueWrapper } from './compat';
 import { getExecutionContextForAction, runWithExecutionContext } from './execution-context';
 import { buildForwardMsgCompat, buildForwardMsgParts } from './forward';
 import type { IPCApiResponse, IPCEventMessage, IPCReplyResult, ParentToWorker, ReplyContent } from './protocol';
@@ -181,7 +182,6 @@ function createIdentityLogger(identity: (value: any) => string, appendLog: (leve
   );
 }
 
-const compatProxyCache = new WeakMap<object, any>();
 const compatWarnedKeys = new Set<string>();
 
 function warnCompatMissing(kind: 'get' | 'call' | 'construct', label: string): void {
@@ -194,162 +194,7 @@ function warnCompatMissing(kind: 'get' | 'call' | 'construct', label: string): v
   log('warn', `[compat] 缺失${kind === 'get' ? '属性' : kind === 'call' ? '方法' : '构造器'}: ${label}`);
 }
 
-function createNoopCompatProxy(label: string) {
-  const emptyArrayMethods = {
-    filter: (_fn?: any) => [],
-    map: (_fn?: any) => [],
-    flatMap: (_fn?: any) => [],
-    slice: (..._args: any[]) => [],
-    concat: (...args: any[]) => (args.flat ? ([] as any[]).concat(...args) : []),
-    includes: (_value?: any) => false,
-    indexOf: (_value?: any) => -1,
-    find: (_fn?: any) => undefined,
-    some: (_fn?: any) => false,
-    every: (_fn?: any) => true,
-    forEach: (_fn?: any) => undefined,
-    reduce: (_fn?: any, initial?: any) => initial,
-    join: (sep = ',') => ['', ''].join(sep).slice(0, 0),
-    at: (_index: number) => undefined,
-    values: function* values() {},
-    entries: function* entries() {},
-    keys: function* keys() {},
-    [Symbol.iterator]: function* iterator() {}
-  } as const;
-
-  const fn = (() => undefined) as any;
-
-  return new Proxy(fn, {
-    get(_target, prop) {
-      if (prop === 'then') {
-        return undefined;
-      }
-      if (prop === Symbol.toPrimitive) {
-        return (hint: string) => (hint === 'number' ? 0 : '');
-      }
-      if (prop === Symbol.iterator) {
-        return emptyArrayMethods[Symbol.iterator];
-      }
-      if (prop === 'toString') {
-        return () => '';
-      }
-      if (prop === 'valueOf') {
-        return () => 0;
-      }
-      if (prop === 'length') {
-        return 0;
-      }
-      if (prop === '__compatLabel') {
-        return label;
-      }
-      if (typeof prop === 'string' && prop in emptyArrayMethods) {
-        return (emptyArrayMethods as any)[prop];
-      }
-      if (typeof prop === 'string' && /^\d+$/.test(prop)) {
-        return undefined;
-      }
-
-      warnCompatMissing('get', `${label}.${String(prop)}`);
-
-      return createNoopCompatProxy(`${label}.${String(prop)}`);
-    },
-    apply() {
-      warnCompatMissing('call', label);
-
-      return createNoopCompatProxy(`${label}()`);
-    },
-    construct() {
-      warnCompatMissing('construct', label);
-
-      return createNoopCompatProxy(`new ${label}()`);
-    },
-    set() {
-      return true;
-    },
-    has() {
-      return false;
-    },
-    ownKeys() {
-      return [];
-    },
-    getOwnPropertyDescriptor() {
-      return {
-        configurable: true,
-        enumerable: false
-      };
-    }
-  });
-}
-
-function wrapCompatValue<T>(value: T, label: string): T {
-  if (value === null || value === undefined) {
-    return createNoopCompatProxy(label) as T;
-  }
-
-  const valueType = typeof value;
-
-  if (valueType !== 'object' && valueType !== 'function') {
-    return value;
-  }
-
-  const objectValue = value as object;
-
-  if (compatProxyCache.has(objectValue)) {
-    return compatProxyCache.get(objectValue);
-  }
-
-  const proxy = new Proxy(value as any, {
-    get(target, prop, receiver) {
-      if (!(prop in target)) {
-        if (prop === 'then') {
-          return undefined;
-        }
-
-        warnCompatMissing('get', `${label}.${String(prop)}`);
-
-        return createNoopCompatProxy(`${label}.${String(prop)}`);
-      }
-
-      const result = Reflect.get(target, prop, receiver);
-
-      if (typeof result === 'function') {
-        return new Proxy(result.bind(target), {
-          apply(fnTarget, thisArg, argArray) {
-            const called = Reflect.apply(fnTarget, thisArg, argArray);
-
-            return wrapCompatValue(called, `${label}.${String(prop)}()`);
-          },
-          construct(fnTarget, argArray, newTarget) {
-            const constructed = Reflect.construct(fnTarget, argArray, newTarget);
-
-            return wrapCompatValue(constructed, `${label}.${String(prop)}()`);
-          },
-          get(fnTarget, fnProp, fnReceiver) {
-            if (!(fnProp in fnTarget)) {
-              if (fnProp === 'then') {
-                return undefined;
-              }
-
-              warnCompatMissing('get', `${label}.${String(prop)}.${String(fnProp)}`);
-
-              return createNoopCompatProxy(`${label}.${String(prop)}.${String(fnProp)}`);
-            }
-
-            return wrapCompatValue(Reflect.get(fnTarget, fnProp, fnReceiver), `${label}.${String(prop)}.${String(fnProp)}`);
-          }
-        });
-      }
-
-      return wrapCompatValue(result, `${label}.${String(prop)}`);
-    },
-    set(target, prop, nextValue, receiver) {
-      return Reflect.set(target, prop, nextValue, receiver);
-    }
-  });
-
-  compatProxyCache.set(objectValue, proxy);
-
-  return proxy;
-}
+const wrapCompatValue = createCompatValueWrapper(warnCompatMissing);
 
 function injectGlobals(): void {
   const g = globalThis as any;
@@ -591,42 +436,42 @@ function injectGlobals(): void {
     // ── EventEmitter 兼容（yenai-plugin 等插件在加载时调用 Bot.on） ──
     // eslint-disable-next-line func-call-spacing
     _events: new Map<string, ((...args: any[]) => void)[]>(),
-    on(event: string, fn: (...args: any[]) => void) {
+    on(this: any, event: string, fn: (...args: any[]) => void) {
       const list = botInstance._events.get(event) ?? [];
 
       list.push(fn);
       botInstance._events.set(event, list);
 
-      return botInstance;
+      return this;
     },
-    addListener(event: string, fn: (...args: any[]) => void) {
-      return botInstance.on(event, fn);
+    addListener(this: any, event: string, fn: (...args: any[]) => void) {
+      return this.on(event, fn);
     },
-    prependListener(event: string, fn: (...args: any[]) => void) {
+    prependListener(this: any, event: string, fn: (...args: any[]) => void) {
       const list = botInstance._events.get(event) ?? [];
 
       list.unshift(fn);
       botInstance._events.set(event, list);
 
-      return botInstance;
+      return this;
     },
-    once(event: string, fn: (...args: any[]) => void) {
+    once(this: any, event: string, fn: (...args: any[]) => void) {
       const wrapper = (...args: any[]) => {
-        botInstance.off(event, wrapper);
+        this.off(event, wrapper);
         fn(...args);
       };
 
-      return botInstance.on(event, wrapper);
+      return this.on(event, wrapper);
     },
-    prependOnceListener(event: string, fn: (...args: any[]) => void) {
+    prependOnceListener(this: any, event: string, fn: (...args: any[]) => void) {
       const wrapper = (...args: any[]) => {
-        botInstance.off(event, wrapper);
+        this.off(event, wrapper);
         fn(...args);
       };
 
-      return botInstance.prependListener(event, wrapper);
+      return this.prependListener(event, wrapper);
     },
-    off(event: string, fn: (...args: any[]) => void) {
+    off(this: any, event: string, fn: (...args: any[]) => void) {
       const list = botInstance._events.get(event);
 
       if (list) {
@@ -636,10 +481,10 @@ function injectGlobals(): void {
         );
       }
 
-      return botInstance;
+      return this;
     },
-    removeListener(event: string, fn: (...args: any[]) => void) {
-      return botInstance.off(event, fn);
+    removeListener(this: any, event: string, fn: (...args: any[]) => void) {
+      return this.off(event, fn);
     },
     emit(event: string, ...args: any[]) {
       const list = botInstance._events.get(event);
@@ -656,14 +501,14 @@ function injectGlobals(): void {
 
       return !!list?.length;
     },
-    removeAllListeners(event?: string) {
+    removeAllListeners(this: any, event?: string) {
       if (event) {
         botInstance._events.delete(event);
       } else {
         botInstance._events.clear();
       }
 
-      return botInstance;
+      return this;
     },
     listenerCount(event: string) {
       return botInstance._events.get(event)?.length ?? 0;
@@ -677,8 +522,8 @@ function injectGlobals(): void {
     eventNames() {
       return [...botInstance._events.keys()];
     },
-    setMaxListeners(_n: number) {
-      return botInstance;
+    setMaxListeners(this: any, _n: number) {
+      return this;
     },
     getMaxListeners() {
       return Infinity;
@@ -714,10 +559,10 @@ function injectGlobals(): void {
 
   g.Bot = wrapCompatValue(
     new Proxy(botInstance, {
-      get(target, prop) {
+      get(target, prop, receiver) {
         // Bot[uin] → 返回 bot 自身（Yunzai 用 Bot[e.self_id] 取实例）
         if (typeof prop === 'string' && /^\d+$/.test(prop)) {
-          return target;
+          return receiver;
         }
 
         return target[prop as keyof typeof target];

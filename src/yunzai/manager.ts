@@ -10,7 +10,7 @@ import { getConfigValue, logger } from 'alemonjs';
 import extractZip from 'extract-zip';
 import type { ChildProcess } from 'node:child_process';
 import { execFile, fork } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PluginInfo } from '../path';
@@ -1022,6 +1022,49 @@ class YunzaiManager {
       logger.info('[Yunzai] 依赖安装完成');
 
       return out;
+    } finally {
+      this.endTask();
+    }
+  }
+
+  /** 安装 Puppeteer 所需的 Chrome 浏览器 */
+  async installBrowser(): Promise<string> {
+    if (!this.isInstalled) {
+      throw new Error('Yunzai 未安装');
+    }
+
+    this.beginTask('安装浏览器');
+    try {
+      logger.info('[Yunzai] 正在安装 Puppeteer Chrome 浏览器...');
+      const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+      const output = await new Promise<string>((resolve, reject) => {
+        try {
+          const cp = execFile(command, ['puppeteer', 'browsers', 'install', 'chrome'], { cwd: getYunzaiDir(), timeout: 1_800_000 }, (err, stdout, stderr) => {
+            this.taskProcess = null;
+
+            if (err) {
+              const hint = (err as any).killed ? ' (超时)' : '';
+              const detail = stderr?.trim() ? `${stderr.trim()}\n${err.message}` : err.message;
+
+              reject(new Error(`${detail}${hint}`));
+
+              return;
+            }
+
+            resolve(stdout);
+          });
+
+          this.taskProcess = cp;
+        } catch (err) {
+          this.taskProcess = null;
+          reject(err);
+        }
+      });
+
+      this.throwIfCancelled();
+      logger.info('[Yunzai] Puppeteer Chrome 浏览器安装完成');
+
+      return output;
     } finally {
       this.endTask();
     }

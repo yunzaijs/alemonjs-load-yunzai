@@ -13,6 +13,7 @@ import {
   sendNativeForward
 } from '../lib/yunzai/forward.js';
 import { getExecutionContext, getExecutionContextForAction, runWithExecutionContext } from '../lib/yunzai/execution-context.js';
+import { createCompatValueWrapper } from '../lib/yunzai/compat.js';
 import {
   oneBotGroupMessageEvent,
   oneBotNoticeEvent,
@@ -36,7 +37,7 @@ function createRuntimeMock(overrides = {}) {
       return {};
     },
     serializeReply: async msg => [{ type: 'text', data: String(msg) }],
-    wrapCompatValue: value => value,
+    wrapCompatValue: overrides.wrapCompatValue ?? (value => value),
     safeInt: (value, fallback) => {
       const parsed = Number.parseInt(String(value), 10);
 
@@ -331,6 +332,15 @@ test('group and friend adapters expose icqq-like methods', async () => {
   assert.equal(member.card, 'MemberCard');
   assert.equal(member.is_owner, true);
   assert.equal((await member.info).nickname, 'MemberNick');
+  assert.deepEqual(await member.getInfo(), {
+    user_id: 10001,
+    nickname: 'MemberNick',
+    card: 'MemberCard',
+    remark: 'MemberCard',
+    role: 'owner',
+    title: 'Leader',
+    level: 9
+  });
 
   const friend = runtime.createOneBotFriendAdapter(10001, 'Alice');
   const fileUrl = await friend.getFileUrl('file-1');
@@ -339,6 +349,87 @@ test('group and friend adapters expose icqq-like methods', async () => {
   assert.equal(friend.remark, 'AliceRemark');
   assert.equal(fileUrl, 'https://example.com/file');
   assert.ok(apiCalls.some(call => call.action === 'getPrivateFileUrl'));
+});
+
+test('compat wrapper keeps plain data serializable without false missing-property warnings', async () => {
+  const warnings = [];
+  const wrap = createCompatValueWrapper((kind, label) => warnings.push({ kind, label }));
+  const { runtime } = createRuntimeMock({
+    wrapCompatValue: wrap,
+    api: {
+      getGroupMemberInfo: {
+        data: { user_id: 10001, card: 'MemberCard', role: 'owner', title: 'Leader' }
+      }
+    }
+  });
+  const member = runtime.createOneBotGroupAdapter(20001).pickMember(10001);
+  const memberInfo = member.getInfo();
+
+  assert.equal(JSON.stringify(memberInfo), '{}');
+  assert.doesNotThrow(() => JSON.stringify(member));
+  const info = await memberInfo;
+  assert.equal(info.user_id, 10001);
+  assert.equal(info.card, 'MemberCard');
+  assert.equal(info.role, 'owner');
+  assert.equal(info.title, 'Leader');
+  assert.doesNotThrow(() => JSON.stringify(info));
+  assert.deepEqual(warnings, []);
+});
+
+test('compat wrapper protects explicit nested behavior namespaces and fluent entity chains', async () => {
+  const warnings = [];
+  const wrap = createCompatValueWrapper((kind, label) => warnings.push({ kind, label }));
+  const { runtime } = createRuntimeMock({
+    wrapCompatValue: wrap,
+    api: {
+      get_group_file_system_info: { data: { total_count: 3 } }
+    }
+  });
+
+  runtime.createOneBotBotAdapter({
+    nickname: 'Bot',
+    tiny_id: '',
+    avatar: '',
+    fl: new Map(),
+    gl: new Map(),
+    gml: new Map(),
+    stat: {},
+    uin: 123456
+  });
+
+  const fs = runtime.createOneBotGroupAdapter(20001).fs;
+  const diskInfo = fs.df();
+
+  assert.equal(JSON.stringify(diskInfo), '{}');
+  assert.deepEqual(await diskInfo, { total_count: 3 });
+  assert.doesNotThrow(() => JSON.stringify(fs));
+  assert.doesNotThrow(() => fs.notImplemented());
+
+  const botTarget = {
+    on() {
+      return this;
+    }
+  };
+  const bot = wrap(new Proxy(botTarget, {
+    get(target, prop, receiver) {
+      return typeof prop === 'string' && /^\d+$/.test(prop)
+        ? receiver
+        : Reflect.get(target, prop, receiver);
+    },
+    has(target, prop) {
+      return (typeof prop === 'string' && /^\d+$/.test(prop)) || Reflect.has(target, prop);
+    }
+  }), 'Bot');
+
+  assert.strictEqual(bot.on(), bot);
+  assert.strictEqual(bot[123456], bot);
+  assert.doesNotThrow(() => bot.on().notImplemented());
+  assert.deepEqual(warnings, [
+    { kind: 'get', label: 'Group(20001).fs.notImplemented' },
+    { kind: 'call', label: 'Group(20001).fs.notImplemented' },
+    { kind: 'get', label: 'Bot.notImplemented' },
+    { kind: 'call', label: 'Bot.notImplemented' }
+  ]);
 });
 
 test('group and member proxies keep cached properties consistent after mutations', async () => {

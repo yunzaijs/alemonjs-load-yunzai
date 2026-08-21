@@ -41,6 +41,8 @@ master_key:
 
 `#yz安装` -> `#yz安装插件miao` -> `#yz安装依赖` -> `#yz启动/#yz重启`
 
+- 如帮助、面板等图片指令提示 Chromium/Chrome 缺失，可发送 `#yz安装浏览器`。该指令会在 Yunzai 目录执行 `npx puppeteer browsers install chrome`。
+
 ## 配置项
 
 在 `alemon.config.yaml` 中通过 `alemonjs-load-yunzai` 键进行配置，所有项均为可选：

@@ -300,61 +300,65 @@ export function createOneBotRuntime(deps: {
               })
               .catch(() => false);
 
-          return {
-            user_id: uid,
-            group_id: groupId,
-            get card() {
-              return current().card;
-            },
-            get nickname() {
-              return current().nickname;
-            },
-            get remark() {
-              return current().remark;
-            },
-            get title() {
-              return current().title;
-            },
-            get role() {
-              return current().role;
-            },
-            get level() {
-              return current().level;
-            },
-            get is_admin() {
-              return current().role === 'admin' || current().role === 'owner';
-            },
-            get is_owner() {
-              return current().role === 'owner';
-            },
-            is_friend: false,
-            get mute_left() {
-              const timestamp = current().shut_up_timestamp;
+          return wrapCompatValue(
+            {
+              user_id: uid,
+              group_id: groupId,
+              get card() {
+                return current().card;
+              },
+              get nickname() {
+                return current().nickname;
+              },
+              get remark() {
+                return current().remark;
+              },
+              get title() {
+                return current().title;
+              },
+              get role() {
+                return current().role;
+              },
+              get level() {
+                return current().level;
+              },
+              get is_admin() {
+                return current().role === 'admin' || current().role === 'owner';
+              },
+              get is_owner() {
+                return current().role === 'owner';
+              },
+              is_friend: false,
+              get mute_left() {
+                const timestamp = current().shut_up_timestamp;
 
-              return timestamp ? Math.max(0, timestamp - Math.floor(Date.now() / 1000)) : 0;
+                return timestamp ? Math.max(0, timestamp - Math.floor(Date.now() / 1000)) : 0;
+              },
+              get _info() {
+                return current();
+              },
+              group: createOneBotGroupAdapter(groupId, opts),
+              get info() {
+                return fetchMemberRecord(groupId, uid);
+              },
+              getInfo: (noCache = false) => fetchMemberRecord(groupId, uid, noCache),
+              renew: () => fetchMemberRecord(groupId, uid, true),
+              setAdmin: (yes = true) => updateAfter('setGroupAdmin', { group_id: groupId, user_id: uid, enable: yes }, { role: yes ? 'admin' : 'member' }),
+              setTitle: (title = '', duration = -1) => updateAfter('setGroupSpecialTitle', { group_id: groupId, user_id: uid, special_title: title, duration }, { title }),
+              setCard: (card = '') => updateAfter('setGroupCard', { group_id: groupId, user_id: uid, card }, { card, remark: card }),
+              kick: (_msg = '', block = false) => updateAfter('setGroupKick', { group_id: groupId, user_id: uid, reject_add_request: block }, {}, true),
+              mute: (duration = 600) => updateAfter(
+                  'setGroupBan',
+                  { group_id: groupId, user_id: uid, duration },
+                  { shut_up_timestamp: duration > 0 ? Math.floor(Date.now() / 1000) + duration : 0 }
+                ),
+              poke: () => callApi('pokeMember', { group_id: groupId, user_id: uid }).catch(() => false),
+              addFriend: (comment = '') => callApi('_add_friend', { user_id: uid, comment }).catch(() => false),
+              setScreenMsg: (isScreen = true) => callApi('_set_group_screen_msg', { group_id: groupId, user_id: uid, is_screen: isScreen }).catch(() => false),
+              getAvatarUrl: () => `https://q1.qlogo.cn/g?b=qq&s=0&nk=${uid}`
             },
-            get _info() {
-              return current();
-            },
-            group: createOneBotGroupAdapter(groupId, opts),
-            get info() {
-              return fetchMemberRecord(groupId, uid);
-            },
-            renew: () => fetchMemberRecord(groupId, uid, true),
-            setAdmin: (yes = true) => updateAfter('setGroupAdmin', { group_id: groupId, user_id: uid, enable: yes }, { role: yes ? 'admin' : 'member' }),
-            setTitle: (title = '', duration = -1) => updateAfter('setGroupSpecialTitle', { group_id: groupId, user_id: uid, special_title: title, duration }, { title }),
-            setCard: (card = '') => updateAfter('setGroupCard', { group_id: groupId, user_id: uid, card }, { card, remark: card }),
-            kick: (_msg = '', block = false) => updateAfter('setGroupKick', { group_id: groupId, user_id: uid, reject_add_request: block }, {}, true),
-            mute: (duration = 600) => updateAfter(
-                'setGroupBan',
-                { group_id: groupId, user_id: uid, duration },
-                { shut_up_timestamp: duration > 0 ? Math.floor(Date.now() / 1000) + duration : 0 }
-              ),
-            poke: () => callApi('pokeMember', { group_id: groupId, user_id: uid }).catch(() => false),
-            addFriend: (comment = '') => callApi('_add_friend', { user_id: uid, comment }).catch(() => false),
-            setScreenMsg: (isScreen = true) => callApi('_set_group_screen_msg', { group_id: groupId, user_id: uid, is_screen: isScreen }).catch(() => false),
-            getAvatarUrl: () => `https://q1.qlogo.cn/g?b=qq&s=0&nk=${uid}`
-          };
+            `Group(${groupId}).pickMember(${uid})`
+          );
         },
         recallMsg: (messageId: any) => callApi('deleteMsg', { message_id: messageId }).catch(() => false),
         muteMember: (uid: number, duration = 600) => createOneBotGroupAdapter(groupId, opts).pickMember(uid).mute(duration),
@@ -414,37 +418,41 @@ export function createOneBotRuntime(deps: {
         getMuteMemberList: () => callApi('_get_group_mute_list', { group_id: groupId })
             .then((res: any) => res?.data ?? [])
             .catch(() => []),
-        fs: {
-          df: () => callApi('get_group_file_system_info', { group_id: groupId })
-              .then((res: any) => res?.data ?? {})
-              .catch(() => ({})),
-          stat: (fid: string) => callApi('_get_group_file_stat', { group_id: groupId, file_id: fid })
-              .then((res: any) => res?.data ?? {})
-              .catch(() => ({})),
-          dir: (pid = '/', start = 0, limit = 100) => callApi('get_group_files_by_folder', { group_id: groupId, folder_id: pid, start, limit })
-              .then((res: any) => [...(res?.data?.files ?? []), ...(res?.data?.folders ?? [])])
-              .catch(() => []),
-          ls: (pid = '/', start = 0, limit = 100) => callApi('get_group_files_by_folder', { group_id: groupId, folder_id: pid, start, limit })
-              .then((res: any) => [...(res?.data?.files ?? []), ...(res?.data?.folders ?? [])])
-              .catch(() => []),
-          mkdir: (name: string) => callApi('create_group_file_folder', { group_id: groupId, name, parent_id: '/' })
-              .then((res: any) => res?.data ?? {})
-              .catch(() => ({})),
-          rm: (fid: string) => callApi('delete_group_file', { group_id: groupId, file_id: fid }).catch(() => {}),
-          rename: (fid: string, name: string) => callApi('_rename_group_file', { group_id: groupId, file_id: fid, name }).catch(() => {}),
-          mv: (fid: string, pid: string) => callApi('_move_group_file', { group_id: groupId, file_id: fid, parent_id: pid }).catch(() => {}),
-          upload: (file: any, pid = '/', name?: string) => callApi('upload_group_file', { group_id: groupId, file: String(file), name: name ?? 'file', folder: pid })
-              .then((res: any) => res?.data ?? {})
-              .catch(() => ({})),
-          download: (fid: string) => callApi('get_group_file_url', { group_id: groupId, file_id: fid })
-              .then((res: any) => res?.data ?? {})
-              .catch(() => ({})),
-          get root_files() {
-            return callApi('get_group_root_files', { group_id: groupId })
-              .then((res: any) => [...(res?.data?.files ?? []), ...(res?.data?.folders ?? [])])
-              .catch(() => []);
-          }
-        }
+        // fs 是带方法的行为命名空间；显式代理它，但不代理每个方法的资料返回值。
+        fs: wrapCompatValue(
+          {
+            df: () => callApi('get_group_file_system_info', { group_id: groupId })
+                .then((res: any) => res?.data ?? {})
+                .catch(() => ({})),
+            stat: (fid: string) => callApi('_get_group_file_stat', { group_id: groupId, file_id: fid })
+                .then((res: any) => res?.data ?? {})
+                .catch(() => ({})),
+            dir: (pid = '/', start = 0, limit = 100) => callApi('get_group_files_by_folder', { group_id: groupId, folder_id: pid, start, limit })
+                .then((res: any) => [...(res?.data?.files ?? []), ...(res?.data?.folders ?? [])])
+                .catch(() => []),
+            ls: (pid = '/', start = 0, limit = 100) => callApi('get_group_files_by_folder', { group_id: groupId, folder_id: pid, start, limit })
+                .then((res: any) => [...(res?.data?.files ?? []), ...(res?.data?.folders ?? [])])
+                .catch(() => []),
+            mkdir: (name: string) => callApi('create_group_file_folder', { group_id: groupId, name, parent_id: '/' })
+                .then((res: any) => res?.data ?? {})
+                .catch(() => ({})),
+            rm: (fid: string) => callApi('delete_group_file', { group_id: groupId, file_id: fid }).catch(() => {}),
+            rename: (fid: string, name: string) => callApi('_rename_group_file', { group_id: groupId, file_id: fid, name }).catch(() => {}),
+            mv: (fid: string, pid: string) => callApi('_move_group_file', { group_id: groupId, file_id: fid, parent_id: pid }).catch(() => {}),
+            upload: (file: any, pid = '/', name?: string) => callApi('upload_group_file', { group_id: groupId, file: String(file), name: name ?? 'file', folder: pid })
+                .then((res: any) => res?.data ?? {})
+                .catch(() => ({})),
+            download: (fid: string) => callApi('get_group_file_url', { group_id: groupId, file_id: fid })
+                .then((res: any) => res?.data ?? {})
+                .catch(() => ({})),
+            get root_files() {
+              return callApi('get_group_root_files', { group_id: groupId })
+                .then((res: any) => [...(res?.data?.files ?? []), ...(res?.data?.folders ?? [])])
+                .catch(() => []);
+            }
+          },
+          `Group(${groupId}).fs`
+        )
       },
       `Group(${groupId})`
     );

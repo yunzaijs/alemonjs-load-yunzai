@@ -98,6 +98,10 @@ export default async (e: EventsEnum, next: Next) => {
       reply('正在安装 Yunzai 依赖（含插件子包）...');
       await manager.installDeps();
       reply('依赖安装完成。如需生效请发送 #yz重启');
+    } else if (cmd.startsWith('安装浏览器')) {
+      reply('正在安装 Puppeteer Chrome 浏览器，下载可能需要几分钟...');
+      await manager.installBrowser();
+      reply('Puppeteer Chrome 浏览器安装完成，现在可重新发送原指令');
     } else if (cmd.startsWith('安装')) {
       // #yz安装 [仓库地址] — 安装 Yunzai 框架本体
       const arg = cmd.replace('安装', '').trim();
