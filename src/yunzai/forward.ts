@@ -9,8 +9,8 @@ export type NativeForwardTarget = {
 export type NativeForwardRequest = {
   action: 'send_group_forward_msg' | 'send_private_forward_msg';
   params: {
-    group_id?: number;
-    user_id?: number;
+    group_id?: string | number;
+    user_id?: string | number;
     messages: any[];
   };
 };
@@ -18,13 +18,46 @@ export type NativeForwardRequest = {
 export type NativeMessageRequest = {
   action: 'send_group_msg' | 'send_private_msg';
   params: {
-    group_id?: number;
-    user_id?: number;
+    group_id?: string | number;
+    user_id?: string | number;
     message: any[];
   };
 };
 
 export type NativeOneBotRequest = NativeForwardRequest | NativeMessageRequest;
+
+/**
+ * 原生动作诊断摘要。绝不输出媒体数据本身，避免 base64 图片进入日志。
+ */
+export function summarizeNativeOneBotRequest(request: NativeOneBotRequest): string {
+  const segments = 'message' in request.params ? request.params.message : request.params.messages;
+  const summary = (Array.isArray(segments) ? segments : []).map(segment => {
+    const type = String(segment?.type ?? 'unknown');
+    const file = segment?.data?.file;
+
+    if (typeof file === 'string' && file.startsWith('base64://')) {
+      const bytes = Math.floor(((file.length - 'base64://'.length) * 3) / 4);
+
+      return `${type}(base64≈${bytes}B)`;
+    }
+
+    return type;
+  });
+  const target = request.action.includes('_group_') ? 'group' : 'private';
+
+  return `action=${request.action}, target=${target}, segments=${summary.join(',') || 'none'}`;
+}
+
+function getTargetId(value: string | number | undefined): string | undefined {
+  if (value === undefined || value === null || String(value) === '') {
+    return undefined;
+  }
+
+  // 与 AlemonJS 通用 message.send 的 OneBot 适配器保持完全相同的 ID 类型。
+  // 部分 OneBot 实现会严格校验字符串 ID；将其转为 number 会导致同一动作
+  // 仅在原生 client.api 路径中失败。
+  return String(value);
+}
 
 /**
  * 将转发消息节点展平为普通消息段数组。
@@ -102,9 +135,9 @@ export function getNativeForwardRequest(contents: ReplyContent[], target: Native
   }
 
   if (target.isPrivate) {
-    const userId = Number(target.userId);
+    const userId = getTargetId(target.userId);
 
-    if (!Number.isFinite(userId)) {
+    if (!userId) {
       return null;
     }
 
@@ -114,9 +147,9 @@ export function getNativeForwardRequest(contents: ReplyContent[], target: Native
     };
   }
 
-  const groupId = Number(target.groupId);
+  const groupId = getTargetId(target.groupId);
 
-  if (!Number.isFinite(groupId)) {
+  if (!groupId) {
     return null;
   }
 
@@ -126,16 +159,68 @@ export function getNativeForwardRequest(contents: ReplyContent[], target: Native
   };
 }
 
-function toOneBotFile(data: string): string {
-  if (data.startsWith('http') || data.startsWith('/') || data.startsWith('file://') || data.startsWith('base64://')) {
+/**
+ * 规范化媒体来源，使原生 OneBot 与 Format → OneBot 的输入含义一致。
+ *
+ * JPEG 的 base64 常以 /9j/ 开头，不能按“以 / 开头即本地路径”处理；data URI
+ * 也必须剥掉头部后再交给 OneBot。这里绝不记录原始媒体内容。
+ */
+export function normalizeOneBotMediaSource(value: unknown): string {
+  const data = String(value ?? '');
+  const dataUri = data.match(/^data:[^;,]+;base64,([A-Za-z0-9+/_-]+={0,2})$/i);
+
+  if (dataUri) {
+    return `base64://${dataUri[1].replace(/-/g, '+').replace(/_/g, '/')}`;
+  }
+
+  if (data.startsWith('base64://')) {
+    return data;
+  }
+  if (data.startsWith('buffer://')) {
+    return `base64://${data.slice('buffer://'.length)}`;
+  }
+
+  // 标准和 URL-safe Base64 都允许；长度阈值避免把常见短文本误判成媒体数据。
+  const base64 = /^[A-Za-z0-9+/_-]+={0,2}$/.test(data) && data.length >= 16 && data.length % 4 === 0;
+
+  if (base64) {
+    return `base64://${data.replace(/-/g, '+').replace(/_/g, '/')}`;
+  }
+
+  if (/^https?:\/\//.test(data) || data.startsWith('file://') || data.startsWith('/')) {
     return data;
   }
 
+  // Yunzai 的 Buffer 序列化结果应全部走到这里；维持历史兼容行为。
   return `base64://${data}`;
 }
 
-function withSegmentParams(params: ReplyContent['params'] | undefined, required: Record<string, string>): Record<string, string | number | boolean> {
-  return { ...params, ...required };
+function toOneBotFile(data: string): string {
+  return normalizeOneBotMediaSource(data);
+}
+
+/**
+ * 仅当 Format 通用接口能不丢失 OneBot 段语义时，才允许原生动作失败后重试。
+ * 引用、合并转发、表情、JSON/XML，以及媒体控制参数均没有等价的 Format 表示，
+ * 因此不能悄悄降成文本或普通消息。
+ */
+export function canUseGenericOneBotFallback(contents: ReplyContent[]): boolean {
+  const directlyRepresentable = new Set<ReplyContent['type']>(['text', 'at', 'image', 'record', 'video']);
+
+  return (
+    contents.length > 0 &&
+    contents.every(content => directlyRepresentable.has(content.type) && !content.quoteMessageId && Object.keys(content.params ?? {}).length === 0)
+  );
+}
+
+function withSegmentParams(
+  params: ReplyContent['params'] | undefined,
+  required: Record<string, string>,
+  segmentType: string
+): Record<string, string | number | boolean> {
+  const normalized = Object.fromEntries(Object.entries(params ?? {}).filter(([key, value]) => key !== 'type' || value !== segmentType));
+
+  return { ...normalized, ...required };
 }
 
 function toOneBotSegments(contents: ReplyContent[]): any[] {
@@ -163,7 +248,9 @@ function toOneBotSegments(contents: ReplyContent[]): any[] {
       case 'image':
       case 'record':
       case 'video':
-        result.push({ type: content.type, data: withSegmentParams(content.params, { file: toOneBotFile(content.data) }) });
+        // Format.addImage 等通用接口不会把段自身的 type 字段塞进媒体 data。
+        // 仅过滤与段类型同名的结构字段，同时保留 type=flash 等真实媒体参数。
+        result.push({ type: content.type, data: withSegmentParams(content.params, { file: toOneBotFile(content.data) }, content.type) });
         break;
       case 'face':
         result.push({ type: 'face', data: { id: content.data } });
@@ -171,6 +258,11 @@ function toOneBotSegments(contents: ReplyContent[]): any[] {
       case 'json':
       case 'xml':
         result.push({ type: content.type, data: { data: content.data } });
+        break;
+      case 'raw':
+        if (content.nativeType && content.nativeData) {
+          result.push({ type: content.nativeType, data: content.nativeData });
+        }
         break;
       default:
         result.push({ type: 'text', data: { text: content.data } });
@@ -182,23 +274,27 @@ function toOneBotSegments(contents: ReplyContent[]): any[] {
 
 /** 没有转发或引用时，标准 OneBot 段可直接发送，避免经 Format 丢失段语义。 */
 export function getNativeMessageRequest(contents: ReplyContent[], target: NativeForwardTarget): NativeMessageRequest | null {
-  const supportedTypes = new Set<ReplyContent['type']>(['text', 'at', 'image', 'record', 'video', 'face', 'json', 'xml']);
+  const supportedTypes = new Set<ReplyContent['type']>(['text', 'at', 'image', 'record', 'video', 'face', 'json', 'xml', 'raw']);
 
-  if (contents.length === 0 || !contents.every(content => supportedTypes.has(content.type))) {
+  if (
+    contents.length === 0 ||
+    contents.some(content => content.quoteMessageId ?? (content.type === 'raw' && (!content.nativeType || !content.nativeData))) ||
+    !contents.every(content => supportedTypes.has(content.type))
+  ) {
     return null;
   }
 
   const message = toOneBotSegments(contents);
 
   if (target.isPrivate) {
-    const userId = Number(target.userId);
+    const userId = getTargetId(target.userId);
 
-    return Number.isFinite(userId) ? { action: 'send_private_msg', params: { user_id: userId, message } } : null;
+    return userId ? { action: 'send_private_msg', params: { user_id: userId, message } } : null;
   }
 
-  const groupId = Number(target.groupId);
+  const groupId = getTargetId(target.groupId);
 
-  return Number.isFinite(groupId) ? { action: 'send_group_msg', params: { group_id: groupId, message } } : null;
+  return groupId ? { action: 'send_group_msg', params: { group_id: groupId, message } } : null;
 }
 
 /** 引用消息使用标准 send_*_msg 动作；携带转发时改发可读 fallback，确保引用不丢失。 */
@@ -212,17 +308,47 @@ export function getNativeQuoteRequest(contents: ReplyContent[], target: NativeFo
   const message = [{ type: 'reply', data: { id: quoteMessageId } }, ...toOneBotSegments(contents)];
 
   if (target.isPrivate) {
-    const userId = Number(target.userId);
+    const userId = getTargetId(target.userId);
 
-    return Number.isFinite(userId) ? { action: 'send_private_msg', params: { user_id: userId, message } } : null;
+    return userId ? { action: 'send_private_msg', params: { user_id: userId, message } } : null;
   }
 
-  const groupId = Number(target.groupId);
+  const groupId = getTargetId(target.groupId);
 
-  return Number.isFinite(groupId) ? { action: 'send_group_msg', params: { group_id: groupId, message } } : null;
+  return groupId ? { action: 'send_group_msg', params: { group_id: groupId, message } } : null;
+}
+
+/**
+ * OneBot 的“引用”和“合并转发”分别是不同动作，无法装入同一条消息。此前会把
+ * 转发摊成文本来保留引用，导致合并转发体验丢失；现在拆成一条引用正文和一条
+ * 原生合并转发，两个语义均可保留。
+ */
+export function getNativeQuotedForwardRequests(contents: ReplyContent[], target: NativeForwardTarget): NativeOneBotRequest[] | null {
+  const forwards = contents.filter(content => content.type === 'forward');
+  const quoteMessageId = contents.find(content => content.quoteMessageId)?.quoteMessageId;
+
+  if (forwards.length !== 1 || !quoteMessageId) {
+    return null;
+  }
+
+  const forward = forwards[0];
+  const forwardRequest = getNativeForwardRequest([{ ...forward, quoteMessageId: undefined }], target);
+
+  if (!forwardRequest) {
+    return null;
+  }
+
+  const quoteBody = contents.filter(content => content !== forward);
+  const quotedContents =
+    quoteBody.length > 0 ? [{ ...quoteBody[0], quoteMessageId }, ...quoteBody.slice(1)] : [{ type: 'text' as const, data: '[转发消息]', quoteMessageId }];
+  const quoteRequest = getNativeQuoteRequest(quotedContents, target);
+
+  return quoteRequest ? [quoteRequest, forwardRequest] : null;
 }
 
 export function getNativeOneBotRequest(contents: ReplyContent[], target: NativeForwardTarget): NativeOneBotRequest | null {
+  // OneBot 事件统一优先走原生动作，用于完整验证 OneBot API 能力；非 OneBot
+  // 平台、未知段或明确不支持的动作才由 bridge 降级到通用 message.send。
   return getNativeForwardRequest(contents, target) ?? getNativeQuoteRequest(contents, target) ?? getNativeMessageRequest(contents, target);
 }
 
@@ -248,6 +374,28 @@ export function getReplyMessageId(result: any): string | undefined {
 
 /** 将 OneBot failed 响应提升为 Error，便于按错误确定性决定是否降级。 */
 export function assertOneBotActionSucceeded(result: any): any {
+  if (Array.isArray(result)) {
+    const success = result.find(item => item?.code === 2000);
+
+    if (success) {
+      return success.data;
+    }
+
+    const failure = result.find(item => item && typeof item === 'object' && 'code' in item);
+
+    if (failure) {
+      const response = failure.data?.oneBotResponse;
+      const error = Object.assign(new Error(`OneBot action failed (${String(failure.code)}: ${String(failure.message ?? 'unknown error')})`), {
+        // 这是平台已返回的明确失败，不是超时或断线；可安全尝试另一路发送。
+        oneBotActionRejected: true,
+        oneBotResultCode: failure.code,
+        oneBotResponse: response
+      });
+
+      throw error;
+    }
+  }
+
   if (result?.status === 'failed' || (typeof result?.retcode === 'number' && result.retcode !== 0)) {
     const error = Object.assign(new Error(result?.wording ?? result?.message ?? `OneBot action failed (retcode=${result?.retcode ?? 'unknown'})`), result);
 
@@ -257,7 +405,113 @@ export function assertOneBotActionSucceeded(result: any): any {
   return result;
 }
 
-/** 便于桥接层与测试共用的 OneBot 原生转发发送入口。 */
-export async function sendNativeForward(client: { send: (request: NativeOneBotRequest) => Promise<any> }, request: NativeOneBotRequest): Promise<any> {
+type NativeOneBotClient = {
+  send: (request: NativeOneBotRequest) => Promise<any>;
+  sendGroupMessage?: (params: NativeMessageRequest['params']) => Promise<any>;
+  sendPrivateMessage?: (params: NativeMessageRequest['params']) => Promise<any>;
+  getConnectionStatus?: () => Promise<any>;
+  sendV12Action?: (action: string, params: Record<string, any>) => Promise<any>;
+};
+
+async function getOneBotActiveVersion(client: NativeOneBotClient): Promise<number | undefined> {
+  if (!client.getConnectionStatus) {
+    return undefined;
+  }
+
+  try {
+    const status = assertOneBotActionSucceeded(await client.getConnectionStatus());
+    const version = Number(status?.activeVersion);
+
+    return version === 11 || version === 12 ? version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getV12UploadParams(file: unknown): Record<string, string> {
+  const input = String(file ?? '');
+
+  if (/^https?:\/\//.test(input)) {
+    return { type: 'url', url: input };
+  }
+  if (input.startsWith('file://')) {
+    return { type: 'path', path: input.slice('file://'.length) };
+  }
+  if (input.startsWith('base64://') || input.startsWith('buffer://')) {
+    return { type: 'data', data: input.slice(input.indexOf('://') + 3) };
+  }
+
+  return { type: 'data', data: input };
+}
+
+async function toV12Message(client: NativeOneBotClient, message: any[]): Promise<any[]> {
+  const sendV12Action = client.sendV12Action;
+
+  if (!sendV12Action) {
+    throw new Error('OneBot v12 原生动作不可用');
+  }
+
+  const converted = await Promise.all(
+    message.map(async segment => {
+      const type = segment?.type;
+
+      if (type === 'text') {
+        return { type: 'text', data: { text: String(segment?.data?.text ?? '') } };
+      }
+      if (type === 'at') {
+        const qq = String(segment?.data?.qq ?? '');
+
+        return qq === 'all' ? { type: 'mention_all', data: {} } : { type: 'mention', data: { user_id: qq } };
+      }
+      if (['image', 'record', 'video'].includes(type)) {
+        const uploaded = assertOneBotActionSucceeded(await sendV12Action('upload_file', getV12UploadParams(segment?.data?.file)));
+        const fileId = uploaded?.file_id ?? uploaded?.id;
+
+        if (!fileId) {
+          throw new Error(`OneBot v12 upload_file 未返回 file_id (${type})`);
+        }
+
+        return { type: type === 'record' ? 'voice' : type, data: { file_id: String(fileId) } };
+      }
+
+      // reply/json/xml/face 由支持其段定义的 V12 实现原样处理；不把内容降为文本。
+      return segment;
+    })
+  );
+
+  return converted;
+}
+
+async function sendV12Message(client: NativeOneBotClient, request: NativeMessageRequest): Promise<any> {
+  if (!client.sendV12Action) {
+    throw new Error('OneBot v12 原生动作不可用');
+  }
+
+  const message = await toV12Message(client, request.params.message);
+  const params =
+    request.action === 'send_group_msg'
+      ? { detail_type: 'group', group_id: request.params.group_id, message }
+      : { detail_type: 'private', user_id: request.params.user_id, message };
+
+  return assertOneBotActionSucceeded(await client.sendV12Action('send_message', params));
+}
+
+/**
+ * 普通消息使用与 OneBot 通用消息适配器相同的语义方法；该适配器内部也是
+ * sendGroupMessage/sendPrivateMessage。只有合并转发没有对应语义方法时才透传 action。
+ */
+export async function sendNativeForward(client: NativeOneBotClient, request: NativeOneBotRequest): Promise<any> {
+  if ((request.action === 'send_group_msg' || request.action === 'send_private_msg') && (await getOneBotActiveVersion(client)) === 12) {
+    return sendV12Message(client, request);
+  }
+
+  if (request.action === 'send_group_msg' && client.sendGroupMessage) {
+    return assertOneBotActionSucceeded(await client.sendGroupMessage(request.params));
+  }
+
+  if (request.action === 'send_private_msg' && client.sendPrivateMessage) {
+    return assertOneBotActionSucceeded(await client.sendPrivateMessage(request.params));
+  }
+
   return assertOneBotActionSucceeded(await client.send(request));
 }

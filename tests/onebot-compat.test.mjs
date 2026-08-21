@@ -5,18 +5,22 @@ import { createOneBotRuntime, isOneBotPlatform } from '../lib/yunzai/adapters/on
 import {
   assertOneBotActionSucceeded,
   buildForwardMsgCompat,
+  canUseGenericOneBotFallback,
   getNativeMessageRequest,
   getNativeOneBotRequest,
   getNativeForwardRequest,
+  getNativeQuotedForwardRequests,
   getReplyMessageId,
   isUnsupportedOneBotActionError,
-  sendNativeForward
+  normalizeOneBotMediaSource,
+  sendNativeForward,
+  summarizeNativeOneBotRequest
 } from '../lib/yunzai/forward.js';
 import { getExecutionContext, getExecutionContextForAction, runWithExecutionContext } from '../lib/yunzai/execution-context.js';
 import { createCompatValueWrapper } from '../lib/yunzai/compat.js';
 import { WorkerEventQueue } from '../lib/yunzai/event-queue.js';
 import { OneBotIngressGuard } from '../lib/yunzai/onebot-ingress.js';
-import { assertMessageSendSucceeded, summarizeReplyContents } from '../lib/yunzai/send-result.js';
+import { assertMessageSendSucceeded, describeFormatContents, describeOneBotError, describeReplyContents, getPlatformFailureSummary, summarizeReplyContents } from '../lib/yunzai/send-result.js';
 import {
   oneBotGroupMessageEvent,
   oneBotNoticeEvent,
@@ -139,7 +143,18 @@ test('send result validation exposes OneBot adapter failures without logging ima
   assert.doesNotThrow(() => assertMessageSendSucceeded([{ code: 2000, message: 'ok' }]));
   assert.doesNotThrow(() => assertMessageSendSucceeded({ message_id: 10001 }));
   assert.throws(() => assertMessageSendSucceeded([{ code: 4000, message: 'upload failed' }]), /平台消息发送失败 \(4000:upload failed\)/);
+  assert.throws(
+    () => assertMessageSendSucceeded([{ code: 4000, message: 'upload failed', data: { oneBotResponse: { status: 'failed', retcode: 1002, wording: 'bad file', data: null } } }]),
+    error => describeOneBotError(error) === 'status=failed, retcode=1002, wording=bad file, data=null'
+  );
+  assert.equal(getPlatformFailureSummary([{ code: 4000, message: 'request failed' }]), '4000:request failed');
+  assert.equal(getPlatformFailureSummary([{ code: 2000, message: 'ok' }, { code: 4000, message: 'other target failed' }]), undefined);
   assert.equal(summarizeReplyContents([{ type: 'image', data: 'a'.repeat(16) }, { type: 'text', data: 'done' }]), 'segments=2, images=1, imageBytes≈12');
+  assert.match(describeReplyContents([{ type: 'image', data: 'a'.repeat(16), params: { cache: 0 } }]), /data=base64\(length=16\),params=cache/);
+  assert.doesNotMatch(describeReplyContents([{ type: 'image', data: 'sensitive-image-data' }]), /sensitive-image-data/);
+  assert.match(describeFormatContents([{ type: 'Image', value: 'base64://a'.repeat(8) }]), /value=base64\(length=/);
+  assert.equal(describeOneBotError({ oneBotResponse: { status: 'failed', retcode: 1002, wording: 'invalid request', data: null } }), 'status=failed, retcode=1002, wording=invalid request, data=null');
+  assert.equal(describeOneBotError({ oneBotResponse: { status: 'failed', retcode: 1200, wording: 'uri= /9j/abcdefghijklmnop', data: null } }), 'status=failed, retcode=1200, wording=uri= <redacted-base64>, data=null');
 });
 
 test('forward compatibility preserves nodes and builds a readable fallback', () => {
@@ -184,11 +199,11 @@ test('native forward request uses correct OneBot action and preserves nodes', as
 
   assert.deepEqual(groupRequest, {
     action: 'send_group_forward_msg',
-    params: { group_id: 20001, messages: nodes }
+    params: { group_id: '20001', messages: nodes }
   });
   assert.deepEqual(privateRequest, {
     action: 'send_private_forward_msg',
-    params: { user_id: 10001, messages: nodes }
+    params: { user_id: '10001', messages: nodes }
   });
   assert.equal(getNativeForwardRequest([...contents, { type: 'text', data: 'extra' }], { isPrivate: false, groupId: 20001 }), null);
 
@@ -196,6 +211,51 @@ test('native forward request uses correct OneBot action and preserves nodes', as
 
   assert.deepEqual(calls, [groupRequest]);
   assert.equal(getReplyMessageId(result), '666');
+});
+
+test('standard native messages use the same semantic OneBot methods as generic dispatch', async () => {
+  const calls = [];
+  const request = getNativeMessageRequest([{ type: 'image', data: 'aGVsbG8=' }], { isPrivate: false, groupId: '20001' });
+  const client = {
+    send: async request => {
+      calls.push(['send', request]);
+      return { message_id: 1 };
+    },
+    sendGroupMessage: async params => {
+      calls.push(['sendGroupMessage', params]);
+      return { message_id: 2 };
+    }
+  };
+
+  const result = await sendNativeForward(client, request);
+
+  assert.deepEqual(calls, [['sendGroupMessage', request.params]]);
+  assert.equal(getReplyMessageId(result), '2');
+});
+
+test('native V12 messages use upload_file followed by send_message', async () => {
+  const calls = [];
+  const request = getNativeMessageRequest([{ type: 'image', data: 'aGVsbG8=' }], { isPrivate: false, groupId: '20001' });
+  const client = {
+    send: async () => {
+      throw new Error('V11 send must not be called for V12');
+    },
+    getConnectionStatus: async () => [{ code: 2000, data: { activeVersion: 12 } }],
+    sendV12Action: async (action, params) => {
+      calls.push([action, params]);
+      return action === 'upload_file'
+        ? [{ code: 2000, data: { file_id: 'file-1' } }]
+        : [{ code: 2000, data: { message_id: 'message-1' } }];
+    }
+  };
+
+  const result = await sendNativeForward(client, request);
+
+  assert.deepEqual(calls, [
+    ['upload_file', { type: 'data', data: 'aGVsbG8=' }],
+    ['send_message', { detail_type: 'group', group_id: '20001', message: [{ type: 'image', data: { file_id: 'file-1' } }] }]
+  ]);
+  assert.equal(getReplyMessageId(result), 'message-1');
 });
 
 test('quoted messages use native OneBot send actions and expand quoted forwards safely', () => {
@@ -216,24 +276,55 @@ test('quoted messages use native OneBot send actions and expand quoted forwards 
   assert.deepEqual(groupRequest, {
     action: 'send_group_msg',
     params: {
-      group_id: 20001,
+      group_id: '20001',
       message: [{ type: 'reply', data: { id: '777' } }, { type: 'text', data: { text: 'pong' } }]
     }
   });
   assert.deepEqual(privateRequest, {
     action: 'send_private_msg',
     params: {
-      user_id: 10001,
+      user_id: '10001',
       message: [{ type: 'reply', data: { id: '777' } }, { type: 'text', data: { text: 'pong' } }]
     }
   });
   assert.deepEqual(quotedForward, {
     action: 'send_group_msg',
     params: {
-      group_id: 20001,
+      group_id: '20001',
       message: [{ type: 'reply', data: { id: '888' } }, { type: 'text', data: { text: '【Alice】\nhello\n' } }]
     }
   });
+});
+
+test('quoted forwards use two native actions so neither quote nor forward semantics are lost', () => {
+  const requests = getNativeQuotedForwardRequests([
+    {
+      type: 'forward',
+      data: 'forward',
+      nodes: [{ type: 'node', data: { user_id: '10001', nickname: 'Alice', content: 'hello' } }],
+      quoteMessageId: '888'
+    }
+  ], { isPrivate: false, groupId: '20001' });
+
+  assert.deepEqual(requests, [
+    {
+      action: 'send_group_msg',
+      params: {
+        group_id: '20001',
+        message: [
+          { type: 'reply', data: { id: '888' } },
+          { type: 'text', data: { text: '[转发消息]' } }
+        ]
+      }
+    },
+    {
+      action: 'send_group_forward_msg',
+      params: {
+        group_id: '20001',
+        messages: [{ type: 'node', data: { user_id: '10001', nickname: 'Alice', content: 'hello' } }]
+      }
+    }
+  ]);
 });
 
 test('standard OneBot messages preserve structured segments and media parameters', () => {
@@ -249,7 +340,7 @@ test('standard OneBot messages preserve structured segments and media parameters
   assert.deepEqual(getNativeMessageRequest(contents, { isPrivate: false, groupId: 20001 }), {
     action: 'send_group_msg',
     params: {
-      group_id: 20001,
+      group_id: '20001',
       message: [
         { type: 'text', data: { text: 'hello ' } },
         { type: 'at', data: { qq: '10001' } },
@@ -261,6 +352,93 @@ test('standard OneBot messages preserve structured segments and media parameters
     }
   });
   assert.equal(getNativeMessageRequest([{ type: 'other', data: 'unknown' }], { isPrivate: false, groupId: 20001 }), null);
+  assert.deepEqual(getNativeOneBotRequest(contents, { isPrivate: false, groupId: 20001 }), getNativeMessageRequest(contents, { isPrivate: false, groupId: 20001 }));
+});
+
+test('native media segments discard only leaked structural type while preserving real media type', () => {
+  const image = getNativeMessageRequest([
+    { type: 'image', data: 'aGVsbG8=', params: { type: 'image', cache: 0 } }
+  ], { isPrivate: false, groupId: '20001' });
+  const flash = getNativeMessageRequest([
+    { type: 'image', data: 'aGVsbG8=', params: { type: 'flash', cache: 0 } }
+  ], { isPrivate: false, groupId: '20001' });
+
+  assert.deepEqual(image.params.message[0].data, { cache: 0, file: 'base64://aGVsbG8=' });
+  assert.deepEqual(flash.params.message[0].data, { type: 'flash', cache: 0, file: 'base64://aGVsbG8=' });
+});
+
+test('native request diagnostics expose segment shape without image base64 data', () => {
+  const request = getNativeMessageRequest([{ type: 'image', data: 'aGVsbG8=' }], { isPrivate: false, groupId: '20001' });
+  const summary = summarizeNativeOneBotRequest(request);
+
+  assert.match(summary, /action=send_group_msg/);
+  assert.match(summary, /image\(base64≈6B\)/);
+  assert.doesNotMatch(summary, /aGVsbG8=/);
+});
+
+test('native JPEG base64 is never mistaken for an absolute path', () => {
+  const request = getNativeMessageRequest([{ type: 'image', data: '/9j/QUJDREVGR0hJSktMTU5PUA==' }], { isPrivate: false, groupId: '20001' });
+
+  assert.equal(request.params.message[0].data.file, 'base64:///9j/QUJDREVGR0hJSktMTU5PUA==');
+});
+
+test('all native media sources use one normal form for raw and generic dispatch', () => {
+  assert.equal(normalizeOneBotMediaSource('/9j/QUJDREVGR0hJSktMTU5PUA=='), 'base64:///9j/QUJDREVGR0hJSktMTU5PUA==');
+  assert.equal(normalizeOneBotMediaSource('data:image/jpeg;base64,/9j/QUJDREVGR0hJSktMTU5PUA=='), 'base64:///9j/QUJDREVGR0hJSktMTU5PUA==');
+  assert.equal(normalizeOneBotMediaSource('buffer://aGVsbG8='), 'base64://aGVsbG8=');
+  assert.equal(normalizeOneBotMediaSource('https://example.com/video.mp4'), 'https://example.com/video.mp4');
+  assert.equal(normalizeOneBotMediaSource('file:///tmp/voice.mp3'), 'file:///tmp/voice.mp3');
+
+  const media = getNativeMessageRequest([
+    { type: 'record', data: 'data:audio/ogg;base64,aGVsbG8=' },
+    { type: 'video', data: '/9j/QUJDREVGR0hJSktMTU5PUA==' }
+  ], { isPrivate: false, groupId: '20001' });
+
+  assert.deepEqual(media.params.message, [
+    { type: 'record', data: { file: 'base64://aGVsbG8=' } },
+    { type: 'video', data: { file: 'base64:///9j/QUJDREVGR0hJSktMTU5PUA==' } }
+  ]);
+});
+
+test('generic retry is allowed only when Format can preserve the OneBot segment semantics', () => {
+  assert.equal(canUseGenericOneBotFallback([{ type: 'text', data: 'hello' }]), true);
+  assert.equal(canUseGenericOneBotFallback([{ type: 'image', data: 'aGVsbG8=' }, { type: 'record', data: 'https://example.com/a.ogg' }]), true);
+  assert.equal(canUseGenericOneBotFallback([{ type: 'image', data: 'aGVsbG8=', params: { type: 'flash' } }]), false);
+  assert.equal(canUseGenericOneBotFallback([{ type: 'text', data: 'reply', quoteMessageId: '123' }]), false);
+  assert.equal(canUseGenericOneBotFallback([{ type: 'forward', data: 'forward', nodes: [] }]), false);
+  assert.equal(canUseGenericOneBotFallback([{ type: 'face', data: '14' }]), false);
+  assert.equal(canUseGenericOneBotFallback([{ type: 'json', data: '{}' }]), false);
+});
+
+test('OneBot-only structured segments stay native instead of being flattened to text', () => {
+  const request = getNativeMessageRequest([
+    {
+      type: 'raw',
+      data: '',
+      nativeType: 'share',
+      nativeData: {
+        url: 'https://example.com/article',
+        title: 'Article',
+        content: 'Summary',
+        image: 'https://example.com/cover.png'
+      }
+    },
+    { type: 'raw', data: '', nativeType: 'poke', nativeData: { type: '1', id: '2' } }
+  ], { isPrivate: false, groupId: '20001' });
+
+  assert.deepEqual(request.params.message, [
+    {
+      type: 'share',
+      data: {
+        url: 'https://example.com/article',
+        title: 'Article',
+        content: 'Summary',
+        image: 'https://example.com/cover.png'
+      }
+    },
+    { type: 'poke', data: { type: '1', id: '2' } }
+  ]);
+  assert.equal(getNativeMessageRequest([{ type: 'raw', data: '' }], { isPrivate: false, groupId: '20001' }), null);
 });
 
 test('only explicit unsupported OneBot errors are eligible for forward fallback', () => {
@@ -269,6 +447,11 @@ test('only explicit unsupported OneBot errors are eligible for forward fallback'
   assert.equal(isUnsupportedOneBotActionError(new Error('request timed out')), false);
   assert.equal(isUnsupportedOneBotActionError(new Error('socket disconnected')), false);
   assert.throws(() => assertOneBotActionSucceeded({ status: 'failed', retcode: 1404, wording: 'unsupported action' }), /unsupported action/);
+  assert.throws(
+    () => assertOneBotActionSucceeded([{ code: 4000, message: '请求失败', data: null }]),
+    error => error?.oneBotActionRejected === true && error?.oneBotResultCode === 4000 && /4000: 请求失败/.test(error.message)
+  );
+  assert.deepEqual(assertOneBotActionSucceeded([{ code: 2000, message: '请求完成', data: { message_id: 666 } }]), { message_id: 666 });
 });
 
 test('bot adapter normalizes friend and group caches', async () => {
@@ -403,6 +586,30 @@ test('group and friend adapters expose icqq-like methods', async () => {
   assert.equal(friend.remark, 'AliceRemark');
   assert.equal(fileUrl, 'https://example.com/file');
   assert.ok(apiCalls.some(call => call.action === 'getPrivateFileUrl'));
+});
+
+test('direct Bot and entity sends propagate confirmed failures instead of pretending success', async () => {
+  const { runtime } = createRuntimeMock({
+    api: {
+      sendGroupMsg: () => Promise.reject(new Error('send group failed')),
+      sendPrivateMsg: () => Promise.reject(new Error('send private failed'))
+    }
+  });
+  const bot = runtime.createOneBotBotAdapter({
+    nickname: 'Bot',
+    tiny_id: '',
+    avatar: '',
+    fl: new Map(),
+    gl: new Map(),
+    gml: new Map(),
+    stat: {},
+    uin: 123456
+  });
+
+  await assert.rejects(runtime.createOneBotGroupAdapter(20001).sendMsg('hello'), /send group failed/);
+  await assert.rejects(bot.sendGroupMsg(20001, 'hello'), /send group failed/);
+  await assert.rejects(runtime.createOneBotFriendAdapter(10001, 'Alice').sendMsg('hello'), /send private failed/);
+  await assert.rejects(bot.sendPrivateMsg(10001, 'hello'), /send private failed/);
 });
 
 test('compat wrapper keeps plain data serializable without false missing-property warnings', async () => {

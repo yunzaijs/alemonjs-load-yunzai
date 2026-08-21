@@ -261,14 +261,14 @@ function injectGlobals(): void {
     sendGroupMsg: async (gid: number, msg: any) => {
       const contents = await serializeReply(msg);
 
-      return callApi('sendGroupMsg', { group_id: gid, contents }).catch(() => ({}));
+      return callApi('sendGroupMsg', { group_id: gid, contents });
     },
 
     /** 发送私聊消息 */
     sendPrivateMsg: async (uid: number, msg: any) => {
       const contents = await serializeReply(msg);
 
-      return callApi('sendPrivateMsg', { user_id: uid, contents }).catch(() => ({}));
+      return callApi('sendPrivateMsg', { user_id: uid, contents });
     },
 
     /** 获取群列表（填充 gl） */
@@ -670,12 +670,63 @@ function addQuote(contents: ReplyContent[], messageId?: string): ReplyContent[] 
 }
 
 function pickSegmentParams(msg: any, keys: string[]): ReplyContent['params'] | undefined {
-  const source = msg?.data && typeof msg.data === 'object' ? msg.data : msg;
+  const hasNestedData = msg?.data && typeof msg.data === 'object';
+  const source = hasNestedData ? msg.data : msg;
   const params = Object.fromEntries(
-    keys.map(key => [key, source?.[key]]).filter(([, value]) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
+    keys
+      .map(key => [key, source?.[key]])
+      // ICQQ 的外层 type 是段类型（例如 image），不是 OneBot 图片的 type 参数。
+      // 通用 Format 路径不会发送它，原生路径也必须保持一致。
+      .filter(([key, value]) => {
+        const leakedStructuralType = key === 'type' && !hasNestedData && value === msg?.type;
+
+        return !leakedStructuralType && ['string', 'number', 'boolean'].includes(typeof value);
+      })
   );
 
   return Object.keys(params).length > 0 ? params : undefined;
+}
+
+/**
+ * Format 无法表达但 OneBot 常见的结构化段，保留其原生 data 交给父进程发送。
+ * 不把它们 JSON.stringify 成文本，避免 OneBot 本身支持时也被桥接层丢失功能。
+ */
+function serializeNativeOnlySegment(msg: any): ReplyContent {
+  const nativeData =
+    msg?.data && typeof msg.data === 'object' && !Array.isArray(msg.data)
+      ? msg.data
+      : Object.fromEntries(Object.entries(msg ?? {}).filter(([key]) => key !== 'type'));
+
+  return {
+    type: 'raw',
+    data: '',
+    nativeType: String(msg?.type ?? ''),
+    nativeData
+  };
+}
+
+/**
+ * Worker 与 OneBot 服务可能不在同一台机器；本地媒体路径必须在 Worker 侧读成
+ * base64 后跨 IPC 发送，不能把 file:// 或绝对路径交给远端 OneBot 去猜。
+ */
+async function serializeReplyMediaFile(value: unknown): Promise<string> {
+  if (Buffer.isBuffer(value)) {
+    return value.toString('base64');
+  }
+
+  const file = String(value ?? '');
+  const filePath = file.startsWith('file://') ? file.slice('file://'.length) : file;
+
+  if (!filePath.startsWith('/')) {
+    return file;
+  }
+
+  try {
+    return (await fs.promises.readFile(filePath)).toString('base64');
+  } catch {
+    // 路径可能指向 OneBot 服务自身可访问的挂载目录；保留原始来源继续发送。
+    return file;
+  }
 }
 
 async function serializeReplyContent(msg: any): Promise<ReplyContent[]> {
@@ -709,36 +760,7 @@ async function serializeReplyContent(msg: any): Promise<ReplyContent[]> {
 
     switch (msg.type) {
       case 'image': {
-        let file: string;
-
-        if (Buffer.isBuffer(msg.file)) {
-          file = msg.file.toString('base64');
-        } else {
-          const filePath = String(msg.file);
-
-          // file:// 路径 → 异步读取本地文件转 base64（避免阻塞事件循环）
-          if (filePath.startsWith('file://')) {
-            try {
-              const absPath = filePath.replace(/^file:\/\//, '');
-              const buf = await fs.promises.readFile(absPath);
-
-              file = buf.toString('base64');
-            } catch {
-              file = filePath; // 读取失败回退原始路径
-            }
-          } else if (filePath.startsWith('/') && !filePath.startsWith('http')) {
-            // 绝对路径（非 URL）→ 异步读取文件
-            try {
-              const buf = await fs.promises.readFile(filePath);
-
-              file = buf.toString('base64');
-            } catch {
-              file = filePath;
-            }
-          } else {
-            file = filePath;
-          }
-        }
+        const file = await serializeReplyMediaFile(msg.file);
 
         return [{ type: 'image', data: file, params: pickSegmentParams(msg, ['cache', 'proxy', 'timeout', 'type', 'subType', 'summary']) }];
       }
@@ -749,12 +771,12 @@ async function serializeReplyContent(msg: any): Promise<ReplyContent[]> {
       case 'text':
         return [{ type: 'text', data: msg.text ?? '' }];
       case 'record': {
-        const rf = Buffer.isBuffer(msg.file) ? msg.file.toString('base64') : String(msg.file ?? '');
+        const rf = await serializeReplyMediaFile(msg.file);
 
         return [{ type: 'record', data: rf, params: pickSegmentParams(msg, ['cache', 'proxy', 'timeout', 'magic']) }];
       }
       case 'video': {
-        const vf = Buffer.isBuffer(msg.file) ? msg.file.toString('base64') : String(msg.file ?? '');
+        const vf = await serializeReplyMediaFile(msg.file);
 
         return [{ type: 'video', data: vf, params: pickSegmentParams(msg, ['cache', 'proxy', 'timeout']) }];
       }
@@ -763,7 +785,17 @@ async function serializeReplyContent(msg: any): Promise<ReplyContent[]> {
       case 'xml':
         return [{ type: 'xml', data: msg.data ?? '' }];
       case 'share':
-        return [{ type: 'text', data: `${msg.title ?? ''} ${msg.url ?? ''}` }];
+      case 'poke':
+      case 'music':
+      case 'file':
+      case 'location':
+      case 'dice':
+      case 'rps':
+      case 'markdown':
+      case 'mirai':
+      case 'bface':
+      case 'sface':
+        return [serializeNativeOnlySegment(msg)];
       case 'reply':
         return [{ type: 'quote', data: String(msg.id ?? msg.data?.id ?? '') }];
       default:

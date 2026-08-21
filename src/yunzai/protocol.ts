@@ -161,7 +161,7 @@ export type WorkerToParent = IPCReady | IPCReply | IPCError | IPCLog | IPCDone |
 
 /** 序列化后的回复内容 */
 export interface ReplyContent {
-  type: 'text' | 'image' | 'at' | 'face' | 'forward' | 'record' | 'video' | 'json' | 'xml' | 'quote' | 'other';
+  type: 'text' | 'image' | 'at' | 'face' | 'forward' | 'record' | 'video' | 'json' | 'xml' | 'quote' | 'raw' | 'other';
   /** 文本内容 / base64 图片 / 文件路径 / JSON 数据 */
   data: string;
   /** 原始合并转发节点，仅 OneBot 原生合并转发发送时使用 */
@@ -172,4 +172,8 @@ export interface ReplyContent {
   quoteMessageId?: string;
   /** 原生 OneBot 段的可选参数（如图片缓存、代理、超时设置） */
   params?: Record<string, string | number | boolean>;
+  /** OneBot 适配器已有、但 Format 没有等价表示的原生段类型 */
+  nativeType?: string;
+  /** 原生段的完整 data 对象；仅走原生 OneBot 通道，必须保持 IPC 可序列化 */
+  nativeData?: Record<string, unknown>;
 }

@@ -12,16 +12,5 @@ export default defineConfig({
   assets: {
     // 支持图片、字体、文本、yarn cjs 等静态资源
     filter: /\.(png|jpg|jpeg|gif|svg|webp|ico|yaml|txt|ttf|md|cjs)$/
-  },
-  build: {
-    typescript: {
-      // 仅打包src目
-      include: ['src/**/*.ts', 'src/**/*.tsx'],
-      // 输出目录
-      outDir: 'lib',
-      removeComments: true,
-      // 生成声明文件
-      declaration: true
-    }
   }
 });

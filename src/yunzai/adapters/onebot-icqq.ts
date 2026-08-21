@@ -266,7 +266,7 @@ export function createOneBotRuntime(deps: {
         sendMsg: async (msg: any) => {
           const contents = await serializeReply(msg);
 
-          return callApi('sendGroupMsg', { group_id: groupId, contents }).catch(() => ({}));
+          return callApi('sendGroupMsg', { group_id: groupId, contents });
         },
         getMemberMap: () => callApi('getGroupMemberList', { group_id: groupId })
             .then((res: any) => {
@@ -487,7 +487,7 @@ export function createOneBotRuntime(deps: {
         sendMsg: async (msg: any) => {
           const contents = await serializeReply(msg);
 
-          return callApi('sendPrivateMsg', { user_id: userId, contents }).catch(() => ({}));
+          return callApi('sendPrivateMsg', { user_id: userId, contents });
         },
         recallMsg: (messageId: any) => callApi('deleteMsg', { message_id: messageId }).catch(() => false),
         getAvatarUrl: (size: 0 | 40 | 100 | 140 = 0) => `https://q1.qlogo.cn/g?b=qq&s=${size || 640}&nk=${userId}`,
@@ -545,12 +545,12 @@ export function createOneBotRuntime(deps: {
       sendGroupMsg: async (gid: number, msg: any) => {
         const contents = await serializeReply(msg);
 
-        return callApi('sendGroupMsg', { group_id: gid, contents }).catch(() => ({}));
+        return callApi('sendGroupMsg', { group_id: gid, contents });
       },
       sendPrivateMsg: async (uid: number, msg: any) => {
         const contents = await serializeReply(msg);
 
-        return callApi('sendPrivateMsg', { user_id: uid, contents }).catch(() => ({}));
+        return callApi('sendPrivateMsg', { user_id: uid, contents });
       },
       getGroupList: () => callApi('getGroupList')
           .then((res: any) => {

@@ -10,18 +10,40 @@
 import { EventsEnum, Format, logger, Next, sendToChannel, sendToUser, useClient, useGuild, useMe, useMember, useMessage, useRequest, useUser } from 'alemonjs';
 import { getYunzaiEventConcurrency } from '../path';
 import { WorkerEventQueue } from './event-queue';
+import type { NativeForwardTarget } from './forward';
+import {
+  canUseGenericOneBotFallback,
+  getNativeOneBotRequest,
+  getNativeQuotedForwardRequests,
+  getReplyMessageId,
+  isUnsupportedOneBotActionError,
+  normalizeOneBotMediaSource,
+  sendNativeForward,
+  summarizeNativeOneBotRequest
+} from './forward';
 import { manager } from './manager';
 import { OneBotIngressGuard } from './onebot-ingress';
-import { assertMessageSendSucceeded, summarizeReplyContents } from './send-result';
 import type { IPCApiRequest, IPCDone, IPCMedia, IPCReply, ReplyContent } from './protocol';
-import { getNativeOneBotRequest, getReplyMessageId, isUnsupportedOneBotActionError, sendNativeForward } from './forward';
-import type { NativeForwardTarget } from './forward';
+import {
+  assertMessageSendSucceeded,
+  describeFormatContents,
+  describeOneBotError,
+  describeReplyContents,
+  getPlatformFailureSummary,
+  summarizeReplyContents
+} from './send-result';
 
 /**
  * 尝试获取 OneBot 平台的原生 API 客户端
  * 仅在 @alemonjs/onebot 已安装且当前事件来自 OneBot 平台时可用
  */
 let _oneBotAPI: any = null;
+
+function oneBotTrace(message: string): void {
+  if (process.env.YUNZAI_ONEBOT_TRACE === '1') {
+    logger.info(`[bridge][onebot-trace] ${message}`);
+  }
+}
 
 function isOneBotPlatform(platform?: string): boolean {
   return platform === 'onebot';
@@ -193,9 +215,11 @@ async function trySendNativeOneBot(event: EventsEnum | undefined, contents: Repl
     return { handled: false };
   }
 
+  const quotedForwardRequests = getNativeQuotedForwardRequests(contents, target);
   const request = getNativeOneBotRequest(contents, target);
+  const requests = quotedForwardRequests ?? (request ? [request] : []);
 
-  if (!request) {
+  if (requests.length === 0) {
     return { handled: false };
   }
 
@@ -206,17 +230,70 @@ async function trySendNativeOneBot(event: EventsEnum | undefined, contents: Repl
     return { handled: false };
   }
 
-  try {
-    return { handled: true, result: await sendNativeForward(client, request) };
-  } catch (err: any) {
-    if (isUnsupportedOneBotActionError(err)) {
-      logger.warn(`[bridge] OneBot 不支持 ${request.action}，已降级为普通消息: ${err?.message ?? String(err)}`);
+  if (process.env.YUNZAI_ONEBOT_TRACE === '1') {
+    try {
+      const status = await client.getConnectionStatus();
+      const value = Array.isArray(status) ? status.find(item => item?.code === 2000)?.data : status;
 
-      return { handled: false };
+      oneBotTrace(
+        `connection activeVersion=${String(value?.activeVersion ?? 'unknown')}, requestedVersion=${String(value?.requestedVersion ?? 'unknown')}, state=${String(value?.state ?? 'unknown')}`
+      );
+    } catch (error: any) {
+      oneBotTrace(`connection query failed: ${describeOneBotError(error)}`);
+    }
+  }
+
+  for (const request of requests) {
+    oneBotTrace(`native request ${summarizeNativeOneBotRequest(request)}`);
+  }
+
+  let activeRequest = requests[0];
+
+  try {
+    let result: any;
+
+    for (const request of requests) {
+      activeRequest = request;
+      result = await sendNativeForward(client, request);
+    }
+
+    oneBotTrace(`native result success type=${Array.isArray(result) ? 'array' : typeof result}`);
+
+    return { handled: true, result };
+  } catch (err: any) {
+    // 多动作组合已经可能部分成功，绝不能再执行通用重试而造成重复或语义错乱。
+    const fallbackIsLossless = requests.length === 1 && canUseGenericOneBotFallback(contents);
+
+    if (isUnsupportedOneBotActionError(err)) {
+      if (fallbackIsLossless) {
+        logger.warn(`[bridge] OneBot 不支持 ${activeRequest.action}，转用等价通用发送: ${err?.message ?? String(err)}`);
+
+        return { handled: false };
+      }
+
+      logger.error(`[bridge] OneBot 不支持 ${activeRequest.action}，通用接口无法保留段语义，未降级: ${describeOneBotError(err)}`);
+
+      throw err;
+    }
+
+    // OneBot 已明确返回失败时，该动作不会产生消息；可用通用路径发送同一内容。
+    // 超时、连接中断等“结果未知”错误仍不兜底，避免重复消息。
+    if (err?.oneBotActionRejected === true) {
+      if (fallbackIsLossless) {
+        logger.warn(`[bridge] OneBot 原生动作被拒绝，转用等价通用发送: ${summarizeNativeOneBotRequest(activeRequest)}; ${describeOneBotError(err)}`);
+
+        return { handled: false };
+      }
+
+      logger.error(
+        `[bridge] OneBot 原生动作被拒绝，通用接口无法保留段语义，未降级: ${summarizeNativeOneBotRequest(activeRequest)}; ${describeOneBotError(err)}`
+      );
+
+      throw err;
     }
 
     // 超时、连接中断等情况下无法确认服务端是否已发送，不能再降级以免重复消息。
-    logger.error(`[bridge] OneBot 原生消息发送结果不确定，未降级: ${err?.message ?? String(err)}`);
+    logger.error(`[bridge] OneBot 原生消息发送结果不确定，未降级: ${summarizeNativeOneBotRequest(activeRequest)}; ${describeOneBotError(err)}`);
     throw err;
   }
 }
@@ -238,6 +315,10 @@ async function sendDirectContents(contents: ReplyContent[], target: NativeForwar
 
 async function sendReplyWithContext(reply: IPCReply, ctx: { message: ReturnType<typeof useMessage>[0] }, event?: EventsEnum): Promise<void> {
   try {
+    if (event && isOneBotPlatform(event.Platform)) {
+      oneBotTrace(`worker reply id=${reply.id}, ${describeReplyContents(reply.contents)}`);
+    }
+
     const native = await trySendNativeOneBot(
       event,
       reply.contents,
@@ -257,13 +338,25 @@ async function sendReplyWithContext(reply: IPCReply, ctx: { message: ReturnType<
     }
 
     const format = contentsToFormat(reply.contents);
+
+    if (event && isOneBotPlatform(event.Platform)) {
+      oneBotTrace(`generic format ${describeFormatContents(format.value)}`);
+    }
+
     const result = await ctx.message.send({ format });
 
     assertMessageSendSucceeded(result);
+    if (event && isOneBotPlatform(event.Platform)) {
+      oneBotTrace(`generic result success ${getPlatformFailureSummary(result) ?? 'ok'}`);
+    }
 
     sendReplyResult(reply, true, result);
   } catch (err: any) {
-    logger.error(`[bridge] 回复发送失败 id=${reply.id} ${summarizeReplyContents(reply.contents)}: ${err?.message ?? String(err)}`);
+    if (event && isOneBotPlatform(event.Platform)) {
+      oneBotTrace(`send failed ${describeOneBotError(err)}`);
+    }
+
+    logger.error(`[bridge] 回复发送失败 id=${reply.id} ${summarizeReplyContents(reply.contents)}: ${describeOneBotError(err)}`);
     sendReplyResult(reply, false);
   }
 }
@@ -358,11 +451,7 @@ function appendContentsToFormat(format: InstanceType<typeof Format>, contents: R
         format.addText(c.data);
         break;
       case 'image':
-        if (c.data.startsWith('http') || c.data.startsWith('/')) {
-          format.addImage(c.data);
-        } else {
-          format.addImage(`base64://${c.data}`);
-        }
+        format.addImage(normalizeOneBotMediaSource(c.data));
         break;
       case 'at':
         format.addMention(c.data);
@@ -371,19 +460,10 @@ function appendContentsToFormat(format: InstanceType<typeof Format>, contents: R
         format.addText(`[表情${c.data}]`);
         break;
       case 'record':
-        // 语音：URL 或 base64
-        if (c.data.startsWith('http') || c.data.startsWith('/')) {
-          format.addText(`[语音:${c.data}]`);
-        } else {
-          format.addText('[语音]');
-        }
+        format.addAudio(normalizeOneBotMediaSource(c.data));
         break;
       case 'video':
-        if (c.data.startsWith('http') || c.data.startsWith('/')) {
-          format.addText(`[视频:${c.data}]`);
-        } else {
-          format.addText('[视频]');
-        }
+        format.addVideo(normalizeOneBotMediaSource(c.data));
         break;
       case 'forward':
         // 非 OneBot、原生 API 不可用或混合消息时，使用 Worker 提供的完整展平内容。
@@ -395,6 +475,11 @@ function appendContentsToFormat(format: InstanceType<typeof Format>, contents: R
         break;
       case 'quote':
         // 引用是消息级元数据；非 OneBot fallback 保留正文但不伪造引用。
+        break;
+      case 'raw':
+        // 该类型没有跨平台等价表示；OneBot 有上下文时会在原生路径发送。
+        // 无原生上下文时仅提供可读提示，绝不伪造为另一个 OneBot 段。
+        format.addText(c.data || `[OneBot 原生消息:${c.nativeType ?? 'unknown'}]`);
         break;
       default:
         format.addText(c.data);
@@ -448,9 +533,17 @@ async function handleApiRequest(req: IPCApiRequest, msgId?: string): Promise<voi
 
   try {
     const result = await dispatchApi(action, params, msgId);
+    const failure = getPlatformFailureSummary(result);
+
+    if (failure) {
+      // 保持原 API 返回契约，让旧插件自行决定如何降级；仅补足动作名，
+      // 以便区分图片发送和成员/群信息等并行请求的失败。
+      logger.warn(`[bridge] Worker API 返回失败 action=${action} msgId=${msgId ?? '-'}: ${failure}`);
+    }
 
     manager.sendToWorker({ type: 'api_response', reqId, ok: true, data: result });
   } catch (err: any) {
+    logger.warn(`[bridge] Worker API 调用异常 action=${action} msgId=${msgId ?? '-'}: ${err?.message ?? String(err)}`);
     manager.sendToWorker({ type: 'api_response', reqId, ok: false, error: err?.message ?? 'Unknown error' });
   }
 }
