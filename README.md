@@ -58,6 +58,9 @@ alemonjs-load-yunzai:
   yunzai_repo: https://github.com/yoimiya-kokomi/Miao-Yunzai.git
   # miao-plugin 仓库地址
   miao_plugin_repo: https://github.com/yoimiya-kokomi/miao-plugin.git
+  # 同时进入 Yunzai Worker 的事件数，默认 1。
+  # 降低共享 Puppeteer 被并发渲染中断的概率；最大值为 4。
+  event_concurrency: 1
   # 自定义插件（会与内置插件列表合并，别名不区分大小写）
   plugins:
     my:

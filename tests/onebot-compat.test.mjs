@@ -14,6 +14,7 @@ import {
 } from '../lib/yunzai/forward.js';
 import { getExecutionContext, getExecutionContextForAction, runWithExecutionContext } from '../lib/yunzai/execution-context.js';
 import { createCompatValueWrapper } from '../lib/yunzai/compat.js';
+import { WorkerEventQueue } from '../lib/yunzai/event-queue.js';
 import {
   oneBotGroupMessageEvent,
   oneBotNoticeEvent,
@@ -86,6 +87,30 @@ test('execution contexts remain isolated across concurrent plugin work', async (
   ]);
   assert.equal(getExecutionContextForAction('sendGroupMsg'), undefined);
   assert.throws(() => getExecutionContextForAction('deleteMsg'), /缺少事件上下文/);
+});
+
+test('load-layer event queue serializes Worker dispatch and preserves waiting events across restart', () => {
+  const dispatched = [];
+  const queue = new WorkerEventQueue(1);
+
+  queue.enqueue('first', () => dispatched.push('first'));
+  queue.enqueue('second', () => dispatched.push('second'));
+
+  assert.deepEqual(dispatched, ['first']);
+  assert.equal(queue.activeCount, 1);
+  assert.equal(queue.pendingCount, 1);
+
+  queue.complete('first');
+  assert.deepEqual(dispatched, ['first', 'second']);
+  assert.equal(queue.activeCount, 1);
+  assert.equal(queue.pendingCount, 0);
+
+  queue.enqueue('third', () => dispatched.push('third'));
+  queue.abortActive();
+  queue.resume();
+
+  assert.deepEqual(dispatched, ['first', 'second', 'third']);
+  assert.equal(queue.activeCount, 1);
 });
 
 test('forward compatibility preserves nodes and builds a readable fallback', () => {
@@ -373,6 +398,31 @@ test('compat wrapper keeps plain data serializable without false missing-propert
   assert.equal(info.role, 'owner');
   assert.equal(info.title, 'Leader');
   assert.doesNotThrow(() => JSON.stringify(info));
+  assert.deepEqual(warnings, []);
+});
+
+test('compat wrapper keeps Bot cache maps as native Map instances', () => {
+  const warnings = [];
+  const wrap = createCompatValueWrapper((kind, label) => warnings.push({ kind, label }));
+  const fl = new Map([[10001, { nickname: 'Alice' }]]);
+  const gl = new Map([[20001, { group_name: 'GroupA' }]]);
+  const gml = new Map([[20001, new Map([[10001, { card: 'Alice' }]])]]);
+  const bot = wrap({
+    fl,
+    gl,
+    gml,
+    getFriendMap: () => fl,
+    getGroupMap: () => gl
+  }, 'Bot');
+
+  assert.strictEqual(bot.fl, fl);
+  assert.strictEqual(bot.gl, gl);
+  assert.strictEqual(bot.gml, gml);
+  assert.equal(bot.fl.size, 1);
+  assert.equal(bot.gl.size, 1);
+  assert.equal(bot.gml.get(20001).size, 1);
+  assert.strictEqual(bot.getFriendMap(), fl);
+  assert.strictEqual(bot.getGroupMap(), gl);
   assert.deepEqual(warnings, []);
 });
 

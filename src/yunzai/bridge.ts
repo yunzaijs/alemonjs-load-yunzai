@@ -8,6 +8,8 @@
  * 5. 接收 Worker API 请求，调用 AlemonJS 平台 API 实现双向通信
  */
 import { EventsEnum, Format, logger, Next, sendToChannel, sendToUser, useClient, useGuild, useMe, useMember, useMessage, useRequest, useUser } from 'alemonjs';
+import { getYunzaiEventConcurrency } from '../path';
+import { WorkerEventQueue } from './event-queue';
 import { manager } from './manager';
 import type { IPCApiRequest, IPCDone, IPCMedia, IPCReply, ReplyContent } from './protocol';
 import { getNativeOneBotRequest, getReplyMessageId, isUnsupportedOneBotActionError, sendNativeForward } from './forward';
@@ -87,6 +89,15 @@ let idCounter = 0;
 let listenerBound = false;
 let doneListenerBound = false;
 let exitListenerBound = false;
+let queueListenerBound = false;
+
+/**
+ * 事件进入 Worker 前的 load 层背压。
+ *
+ * 默认只允许一个事件在 Worker 内执行。这样即使多个 OneBot 消息同时到达，
+ * 也不会并发触发 Miao-Yunzai 的共享 Puppeteer 渲染器。
+ */
+const workerEventQueue = new WorkerEventQueue(getYunzaiEventConcurrency(), () => manager.isReady);
 
 /** 绑定 Worker 回复监听（仅一次） */
 function bindReplyListener(): void {
@@ -278,6 +289,7 @@ function bindDoneListener(): void {
   doneListenerBound = true;
 
   manager.onDone((done: IPCDone) => {
+    workerEventQueue.complete(done.id);
     const ctx = pending.get(done.id);
 
     if (!ctx) {
@@ -305,6 +317,9 @@ function bindExitListener(): void {
   exitListenerBound = true;
 
   manager.onWorkerExit(() => {
+    // 已开始的事件不能安全重放，避免对签到、管理等业务产生重复副作用；
+    // 尚未发送到 Worker 的事件保留，待下一次 ready 后继续调度。
+    workerEventQueue.abortActive();
     // Worker 崩溃/退出 → 所有未完成的 pending 不可能再收到 reply/done
     for (const id of pending.keys()) {
       cleanPending(id);
@@ -313,6 +328,15 @@ function bindExitListener(): void {
     msgEvents.clear();
     logger.debug('[bridge] Worker 退出，已清理 pending 和 msgEvents');
   });
+}
+
+/** 绑定 Worker 就绪回调，使重启期间积压的事件继续由 load 层调度。 */
+function bindQueueListener(): void {
+  if (queueListenerBound) {
+    return;
+  }
+  queueListenerBound = true;
+  manager.onReady(() => workerEventQueue.resume());
 }
 
 // ━━━━━━━━━━━ ReplyContent → Format 转换 ━━━━━━━━━━━
@@ -905,6 +929,50 @@ function extractAtUsers(event: any): { userId: string; userName?: string }[] {
   return users;
 }
 
+/** 将事件送入 Worker；仅由 load 层队列在获得槽位后调用。 */
+function dispatchEventToWorker(id: string, e: EventsEnum): void {
+  // 按 msgId 精确存储事件引用（解决同平台并发消息上下文错乱）
+  msgEvents.set(id, e);
+  // msgEvents 独立于 pending 生命周期，用 REPLY_MAX_TIMEOUT 确保不泄漏
+  setTimeout(() => cleanMsgEvent(id), REPLY_MAX_TIMEOUT);
+
+  // 为所有事件设置回复上下文
+  // useMessage 内部仅检查 event 是对象，平台适配器决定能否实际发送
+  const [message] = useMessage(e);
+
+  pending.set(id, {
+    message,
+    timer: setTimeout(() => cleanPending(id), REPLY_IDLE_TIMEOUT),
+    maxTimer: setTimeout(() => cleanPending(id), REPLY_MAX_TIMEOUT)
+  });
+
+  // 转发给 Worker — 提取所有 AlemonJS 标准字段
+  const atUsers = extractAtUsers(e);
+  const rawEvent = extractRawEvent(e, e);
+
+  manager.send({
+    type: 'event',
+    id,
+    data: {
+      eventName: e.name ?? '',
+      platform: e.Platform ?? '',
+      botId: e.BotId ?? '',
+      messageText: e.MessageText ?? '',
+      messageId: e.MessageId ?? '',
+      media: extractMedia(e),
+      userId: e.UserId ?? '',
+      userName: e.UserName ?? '',
+      userAvatar: e.UserAvatar ?? '',
+      spaceId: e.GuildId ?? e.ChannelId ?? '',
+      isPrivate: !e.GuildId,
+      isMaster: e.IsMaster ?? false,
+      IsMaster: e.IsMaster ?? false,
+      atUsers,
+      rawEvent
+    }
+  });
+}
+
 export default (e: EventsEnum, next: Next) => {
   if (!manager.isReady) {
     next();
@@ -924,47 +992,10 @@ export default (e: EventsEnum, next: Next) => {
   bindDoneListener();
   bindApiRequestListener();
   bindExitListener();
+  bindQueueListener();
 
   const id = `msg_${++idCounter}_${Date.now()}`;
 
-  // 按 msgId 精确存储事件引用（解决同平台并发消息上下文错乱）
-  msgEvents.set(id, e);
-  // msgEvents 独立于 pending 生命周期，用 REPLY_MAX_TIMEOUT 确保不泄漏
-  setTimeout(() => cleanMsgEvent(id), REPLY_MAX_TIMEOUT);
-
-  // 为所有事件设置回复上下文
-  // useMessage 内部仅检查 event 是对象，平台适配器决定能否实际发送
-  const [message] = useMessage(e);
-
-  pending.set(id, {
-    message,
-    timer: setTimeout(() => cleanPending(id), REPLY_IDLE_TIMEOUT),
-    maxTimer: setTimeout(() => cleanPending(id), REPLY_MAX_TIMEOUT)
-  });
-
-  // 转发给 Worker — 提取所有 AlemonJS 标准字段
-  const _atUsers = extractAtUsers(e);
-  const _rawEvent = extractRawEvent(e, e);
-
-  manager.send({
-    type: 'event',
-    id,
-    data: {
-      eventName,
-      platform: e.Platform ?? '',
-      botId: e.BotId ?? '',
-      messageText: e.MessageText ?? '',
-      messageId: e.MessageId ?? '',
-      media: extractMedia(e),
-      userId: e.UserId ?? '',
-      userName: e.UserName ?? '',
-      userAvatar: e.UserAvatar ?? '',
-      spaceId: e.GuildId ?? e.ChannelId ?? '',
-      isPrivate: !e.GuildId,
-      isMaster: e.IsMaster ?? false,
-      IsMaster: e.IsMaster ?? false,
-      atUsers: _atUsers,
-      rawEvent: _rawEvent
-    }
-  });
+  workerEventQueue.setConcurrency(getYunzaiEventConcurrency());
+  workerEventQueue.enqueue(id, () => dispatchEventToWorker(id, e));
 };

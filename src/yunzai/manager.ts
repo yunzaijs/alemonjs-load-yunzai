@@ -104,6 +104,7 @@ class YunzaiManager {
   private doneHandlers = new Set<(done: any) => void>();
   private apiRequestHandlers = new Set<ApiRequestHandler>();
   private exitHandlers = new Set<(code: number | null) => void>();
+  private readyHandlers = new Set<() => void>();
   private restartCount = 0;
   private maxRestarts = 3;
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
@@ -558,6 +559,13 @@ class YunzaiManager {
           this.restartCount = 0;
           this.markStartOk();
           logger.info(`[Yunzai] Worker 就绪，已加载 ${msg.pluginCount} 个插件`);
+          for (const readyHandler of this.readyHandlers) {
+            try {
+              readyHandler();
+            } catch (err: any) {
+              logger.warn(`[Yunzai] Worker 就绪回调失败: ${err?.message ?? String(err)}`);
+            }
+          }
           resolve();
         } else if (msg.type === 'error') {
           cleanup();
@@ -649,6 +657,13 @@ class YunzaiManager {
     this.exitHandlers.add(handler);
 
     return () => this.exitHandlers.delete(handler);
+  }
+
+  /** Worker 就绪通知（桥接层恢复排队事件使用） */
+  onReady(handler: () => void): () => void {
+    this.readyHandlers.add(handler);
+
+    return () => this.readyHandlers.delete(handler);
   }
 
   /** 发送任意消息给 Worker（用于 API 响应等） */

@@ -25,6 +25,7 @@ const DEFAULT_GH_PROXY = 'https://ghfast.top/';
 const DEFAULT_BOT_NAME = 'Miao-Yunzai';
 const DEFAULT_YUNZAI_REPO = 'https://github.com/yoimiya-kokomi/Miao-Yunzai.git';
 const DEFAULT_MIAO_PLUGIN_REPO = 'https://github.com/yoimiya-kokomi/miao-plugin.git';
+const DEFAULT_EVENT_CONCURRENCY = 1;
 
 function getConfig() {
   const values = getConfigValue() ?? {};
@@ -49,6 +50,22 @@ export function getMiaoPluginRepo(): string {
   const repo = getConfig()?.miao_plugin_repo ?? DEFAULT_MIAO_PLUGIN_REPO;
 
   return `${getGhProxy()}${repo}`;
+}
+
+/**
+ * 同时交给 Yunzai Worker 处理的事件数。
+ *
+ * Yunzai 的 Puppeteer 后端使用单个共享 Chromium，默认串行可避免任一渲染
+ * 失败时重启浏览器、连带中断其他截图任务。需要更高吞吐时可显式调大。
+ */
+export function getYunzaiEventConcurrency(): number {
+  const value = Number(getConfig()?.event_concurrency ?? DEFAULT_EVENT_CONCURRENCY);
+
+  if (!Number.isFinite(value)) {
+    return DEFAULT_EVENT_CONCURRENCY;
+  }
+
+  return Math.min(4, Math.max(1, Math.floor(value)));
 }
 
 // ─── 插件注册表 ───
@@ -167,7 +184,9 @@ export function getAllPlugins(): PluginDef[] {
     if (raw && typeof raw === 'object' && (raw as any).dirName && (raw as any).repoUrl) {
       const dirName = (raw as any).dirName as string;
 
-      if (seen.has(dirName)) { continue; }
+      if (seen.has(dirName)) {
+        continue;
+      }
       seen.add(dirName);
 
       const extraAliases: string[] = Array.isArray((raw as any).aliases) ? (raw as any).aliases : [];
