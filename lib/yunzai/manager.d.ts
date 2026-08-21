@@ -61,6 +61,7 @@ declare class YunzaiManager {
     updatePlugin(plugin: PluginInfo, force?: boolean): Promise<string>;
     uninstallPlugin(plugin: PluginInfo): void;
     installDeps(): Promise<string>;
+    installBrowser(): Promise<string>;
     private patchPackageJsonForInstall;
     private ensureWorkspaces;
 }

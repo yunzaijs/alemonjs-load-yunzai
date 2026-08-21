@@ -124,6 +124,7 @@ export declare function createOneBotRuntime(deps: {
                     };
                 };
                 readonly info: Promise<any>;
+                getInfo: (noCache?: boolean) => Promise<any>;
                 renew: () => Promise<any>;
                 setAdmin: (yes?: boolean) => Promise<any>;
                 setTitle: (title?: string, duration?: number) => Promise<any>;
@@ -186,6 +187,7 @@ export declare function createOneBotRuntime(deps: {
                 readonly _info: any;
                 group: any;
                 readonly info: Promise<any>;
+                getInfo: (noCache?: boolean) => Promise<any>;
                 renew: () => Promise<any>;
                 setAdmin: (yes?: boolean) => Promise<any>;
                 setTitle: (title?: string, duration?: number) => Promise<any>;
@@ -325,6 +327,7 @@ export declare function createOneBotRuntime(deps: {
                     };
                 };
                 readonly info: Promise<any>;
+                getInfo: (noCache?: boolean) => Promise<any>;
                 renew: () => Promise<any>;
                 setAdmin: (yes?: boolean) => Promise<any>;
                 setTitle: (title?: string, duration?: number) => Promise<any>;
@@ -433,6 +436,7 @@ export declare function createOneBotRuntime(deps: {
                 };
             };
             readonly info: Promise<any>;
+            getInfo: (noCache?: boolean) => Promise<any>;
             renew: () => Promise<any>;
             setAdmin: (yes?: boolean) => Promise<any>;
             setTitle: (title?: string, duration?: number) => Promise<any>;
@@ -514,6 +518,7 @@ export declare function createOneBotRuntime(deps: {
             readonly _info: any;
             group: any;
             readonly info: Promise<any>;
+            getInfo: (noCache?: boolean) => Promise<any>;
             renew: () => Promise<any>;
             setAdmin: (yes?: boolean) => Promise<any>;
             setTitle: (title?: string, duration?: number) => Promise<any>;
@@ -653,6 +658,7 @@ export declare function createOneBotRuntime(deps: {
                 };
             };
             readonly info: Promise<any>;
+            getInfo: (noCache?: boolean) => Promise<any>;
             renew: () => Promise<any>;
             setAdmin: (yes?: boolean) => Promise<any>;
             setTitle: (title?: string, duration?: number) => Promise<any>;
