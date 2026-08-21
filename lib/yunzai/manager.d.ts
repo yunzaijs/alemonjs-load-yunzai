@@ -9,6 +9,7 @@ declare class YunzaiManager {
     private doneHandlers;
     private apiRequestHandlers;
     private exitHandlers;
+    private readyHandlers;
     private restartCount;
     private maxRestarts;
     private restartTimer;
@@ -42,6 +43,7 @@ declare class YunzaiManager {
     onDone(handler: (done: any) => void): () => void;
     onApiRequest(handler: ApiRequestHandler): () => void;
     onWorkerExit(handler: (code: number | null) => void): () => void;
+    onReady(handler: () => void): () => void;
     sendToWorker(msg: ParentToWorker): void;
     private handleMessage;
     private beginTask;
