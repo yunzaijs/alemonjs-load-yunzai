@@ -11,6 +11,8 @@ import { EventsEnum, Format, logger, Next, sendToChannel, sendToUser, useClient,
 import { getYunzaiEventConcurrency } from '../path';
 import { WorkerEventQueue } from './event-queue';
 import { manager } from './manager';
+import { OneBotIngressGuard } from './onebot-ingress';
+import { assertMessageSendSucceeded, summarizeReplyContents } from './send-result';
 import type { IPCApiRequest, IPCDone, IPCMedia, IPCReply, ReplyContent } from './protocol';
 import { getNativeOneBotRequest, getReplyMessageId, isUnsupportedOneBotActionError, sendNativeForward } from './forward';
 import type { NativeForwardTarget } from './forward';
@@ -98,6 +100,7 @@ let queueListenerBound = false;
  * 也不会并发触发 Miao-Yunzai 的共享 Puppeteer 渲染器。
  */
 const workerEventQueue = new WorkerEventQueue(getYunzaiEventConcurrency(), () => manager.isReady);
+const oneBotIngressGuard = new OneBotIngressGuard();
 
 /** 绑定 Worker 回复监听（仅一次） */
 function bindReplyListener(): void {
@@ -128,10 +131,11 @@ function bindReplyListener(): void {
         // pending 和 msgEvents 均已过期 → 降级使用 sendToChannel / sendToUser
         if (reply.channelId || reply.userId) {
           logger.info(`[bridge] pending/msgEvents 均过期，降级直发 id=${reply.id} private=${reply.isPrivate}`);
-          const format = contentsToFormat(reply.contents);
           const targetChannel = reply.channelId ?? '';
           const targetUser = reply.userId ?? '';
-          const sendFn = reply.isPrivate ? () => sendToUser(targetUser, format.value) : () => sendToChannel(targetChannel, format.value);
+          const sendFn = () => {
+            return sendDirectContents(reply.contents, reply.isPrivate ? { isPrivate: true, userId: targetUser } : { isPrivate: false, groupId: targetChannel });
+          };
 
           void sendFn()
             .then(res => sendReplyResult(reply, true, res))
@@ -225,8 +229,11 @@ async function sendDirectContents(contents: ReplyContent[], target: NativeForwar
   }
 
   const format = contentsToFormat(contents);
+  const result = target.isPrivate ? await sendToUser(String(target.userId), format.value) : await sendToChannel(String(target.groupId), format.value);
 
-  return target.isPrivate ? sendToUser(String(target.userId), format.value) : sendToChannel(String(target.groupId), format.value);
+  assertMessageSendSucceeded(result);
+
+  return result;
 }
 
 async function sendReplyWithContext(reply: IPCReply, ctx: { message: ReturnType<typeof useMessage>[0] }, event?: EventsEnum): Promise<void> {
@@ -252,8 +259,11 @@ async function sendReplyWithContext(reply: IPCReply, ctx: { message: ReturnType<
     const format = contentsToFormat(reply.contents);
     const result = await ctx.message.send({ format });
 
+    assertMessageSendSucceeded(result);
+
     sendReplyResult(reply, true, result);
-  } catch {
+  } catch (err: any) {
+    logger.error(`[bridge] 回复发送失败 id=${reply.id} ${summarizeReplyContents(reply.contents)}: ${err?.message ?? String(err)}`);
     sendReplyResult(reply, false);
   }
 }
@@ -984,6 +994,15 @@ export default (e: EventsEnum, next: Next) => {
 
   if (!eventName) {
     next();
+
+    return;
+  }
+
+  // 与 qq-bot 的 `author.bot` 过滤对齐：拦住 OneBot 网关回推的机器人
+  // 自身消息，并将短时间内重复投递的同一消息合并。只影响重复/回声事件，
+  // 不会丢弃普通消息、notice 或 request，因此事件型插件仍能完整工作。
+  if (!oneBotIngressGuard.accept(e.Platform, e.value)) {
+    logger.debug(`[bridge] 忽略 OneBot 回声或重复消息 id=${e.MessageId ?? ''}`);
 
     return;
   }

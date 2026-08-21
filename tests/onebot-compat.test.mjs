@@ -15,6 +15,8 @@ import {
 import { getExecutionContext, getExecutionContextForAction, runWithExecutionContext } from '../lib/yunzai/execution-context.js';
 import { createCompatValueWrapper } from '../lib/yunzai/compat.js';
 import { WorkerEventQueue } from '../lib/yunzai/event-queue.js';
+import { OneBotIngressGuard } from '../lib/yunzai/onebot-ingress.js';
+import { assertMessageSendSucceeded, summarizeReplyContents } from '../lib/yunzai/send-result.js';
 import {
   oneBotGroupMessageEvent,
   oneBotNoticeEvent,
@@ -111,6 +113,33 @@ test('load-layer event queue serializes Worker dispatch and preserves waiting ev
 
   assert.deepEqual(dispatched, ['first', 'second', 'third']);
   assert.equal(queue.activeCount, 1);
+});
+
+test('OneBot ingress guard rejects self echoes and only deduplicates the same raw message', () => {
+  const guard = new OneBotIngressGuard(100, 10);
+  const message = {
+    post_type: 'message',
+    self_id: 10001,
+    user_id: 20002,
+    message_type: 'group',
+    group_id: 30003,
+    message_id: 40004
+  };
+
+  assert.equal(guard.accept('onebot', message, 1), true);
+  assert.equal(guard.accept('onebot', message, 2), false);
+  assert.equal(guard.accept('onebot', { ...message, message_id: 40005 }, 2), true);
+  assert.equal(guard.accept('onebot', { ...message, user_id: 10001, message_id: 40006 }, 2), false);
+  assert.equal(guard.accept('onebot', { post_type: 'notice', self_id: 10001, user_id: 10001 }, 2), true);
+  assert.equal(guard.accept('qq-bot', message, 2), true);
+  assert.equal(guard.accept('onebot', message, 102), true);
+});
+
+test('send result validation exposes OneBot adapter failures without logging image data', () => {
+  assert.doesNotThrow(() => assertMessageSendSucceeded([{ code: 2000, message: 'ok' }]));
+  assert.doesNotThrow(() => assertMessageSendSucceeded({ message_id: 10001 }));
+  assert.throws(() => assertMessageSendSucceeded([{ code: 4000, message: 'upload failed' }]), /平台消息发送失败 \(4000:upload failed\)/);
+  assert.equal(summarizeReplyContents([{ type: 'image', data: 'a'.repeat(16) }, { type: 'text', data: 'done' }]), 'segments=2, images=1, imageBytes≈12');
 });
 
 test('forward compatibility preserves nodes and builds a readable fallback', () => {
