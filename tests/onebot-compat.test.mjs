@@ -8,6 +8,7 @@ import {
   canUseGenericOneBotFallback,
   getNativeMessageRequest,
   getNativeOneBotRequest,
+  getNativeForwardFallbackRequest,
   getNativeForwardRequest,
   getNativeQuotedForwardRequests,
   getReplyMessageId,
@@ -211,6 +212,47 @@ test('native forward request uses correct OneBot action and preserves nodes', as
 
   assert.deepEqual(calls, [groupRequest]);
   assert.equal(getReplyMessageId(result), '666');
+});
+
+test('native forward requests convert Yunzai message nodes to the OneBot node segment structure', () => {
+  const request = getNativeForwardRequest(
+    [{ type: 'forward', data: 'hello', nodes: [{ user_id: [10001], nickname: 'Alice', message: 'hello', time: 123 }], fallback: [] }],
+    { isPrivate: true, userId: '20001' }
+  );
+
+  assert.deepEqual(request, {
+    action: 'send_private_forward_msg',
+    params: {
+      user_id: '20001',
+      messages: [{ type: 'node', data: { user_id: 10001, nickname: 'Alice', content: 'hello', time: 123 } }]
+    }
+  });
+});
+
+test('rejected native forwards can send the complete fallback content as an ordinary message', () => {
+  const contents = [
+    {
+      type: 'forward',
+      data: 'forward text',
+      nodes: [{ user_id: '10001', nickname: 'Alice', message: 'forward text' }],
+      fallback: [
+        { type: 'text', data: '欢迎回来主人~' },
+        { type: 'text', data: '登录地址：https://example.com/login' }
+      ]
+    }
+  ];
+
+  assert.deepEqual(getNativeForwardFallbackRequest(contents, { isPrivate: true, userId: '10001' }), {
+    action: 'send_private_msg',
+    params: {
+      user_id: '10001',
+      message: [
+        { type: 'text', data: { text: '欢迎回来主人~' } },
+        { type: 'text', data: { text: '登录地址：https://example.com/login' } }
+      ]
+    }
+  });
+  assert.equal(getNativeForwardFallbackRequest([{ ...contents[0], quoteMessageId: '888' }], { isPrivate: true, userId: '10001' }), null);
 });
 
 test('standard native messages use the same semantic OneBot methods as generic dispatch', async () => {

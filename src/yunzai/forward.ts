@@ -27,6 +27,34 @@ export type NativeMessageRequest = {
 export type NativeOneBotRequest = NativeForwardRequest | NativeMessageRequest;
 
 /**
+ * Yunzai/icqq 的转发节点一般是 { user_id, nickname, message }，而 OneBot
+ * send_*_forward_msg 要求 messages 中每项都是 { type: 'node', data: { ..., content } }。
+ * 不能把前者原样透传，否则 OneBot 会以参数错误拒绝私聊合并转发。
+ */
+function toOneBotForwardNode(node: any): { type: 'node'; data: Record<string, any> } {
+  const source = node?.type === 'node' && node?.data && typeof node.data === 'object' ? node.data : (node ?? {});
+
+  if (source.id !== undefined && source.id !== null && source.id !== '') {
+    return { type: 'node', data: { id: String(source.id) } };
+  }
+
+  const rawUserId = source.user_id ?? source.userId;
+  const userId = Array.isArray(rawUserId) ? rawUserId[0] : rawUserId;
+  const content = source.content ?? source.message ?? '';
+  const data: Record<string, any> = {
+    user_id: userId ?? '',
+    nickname: String(source.nickname ?? source.name ?? ''),
+    content
+  };
+
+  if (source.time !== undefined && source.time !== null) {
+    data.time = Number(source.time);
+  }
+
+  return { type: 'node', data };
+}
+
+/**
  * 原生动作诊断摘要。绝不输出媒体数据本身，避免 base64 图片进入日志。
  */
 export function summarizeNativeOneBotRequest(request: NativeOneBotRequest): string {
@@ -143,7 +171,7 @@ export function getNativeForwardRequest(contents: ReplyContent[], target: Native
 
     return {
       action: 'send_private_forward_msg',
-      params: { user_id: userId, messages: forward.nodes }
+      params: { user_id: userId, messages: forward.nodes.map(toOneBotForwardNode) }
     };
   }
 
@@ -155,8 +183,24 @@ export function getNativeForwardRequest(contents: ReplyContent[], target: Native
 
   return {
     action: 'send_group_forward_msg',
-    params: { group_id: groupId, messages: forward.nodes }
+    params: { group_id: groupId, messages: forward.nodes.map(toOneBotForwardNode) }
   };
+}
+
+/**
+ * 部分 OneBot 实现（尤其私聊）没有实现 send_*_forward_msg。动作被服务端明确
+ * 拒绝后，用 Worker 已构建好的完整展平内容发送普通消息：登录链接、图片等业务
+ * 数据仍可到达，只缺失服务端本来就不支持的“合并转发展示容器”。
+ */
+export function getNativeForwardFallbackRequest(contents: ReplyContent[], target: NativeForwardTarget): NativeMessageRequest | null {
+  if (contents.length !== 1 || contents[0]?.type !== 'forward' || contents[0].quoteMessageId) {
+    return null;
+  }
+
+  const forward = contents[0];
+  const fallback = forward.fallback?.length ? forward.fallback : forward.data ? [{ type: 'text' as const, data: forward.data }] : [];
+
+  return getNativeMessageRequest(fallback, target);
 }
 
 /**

@@ -13,6 +13,7 @@ import { WorkerEventQueue } from './event-queue';
 import type { NativeForwardTarget } from './forward';
 import {
   canUseGenericOneBotFallback,
+  getNativeForwardFallbackRequest,
   getNativeOneBotRequest,
   getNativeQuotedForwardRequests,
   getReplyMessageId,
@@ -263,6 +264,24 @@ async function trySendNativeOneBot(event: EventsEnum | undefined, contents: Repl
   } catch (err: any) {
     // 多动作组合已经可能部分成功，绝不能再执行通用重试而造成重复或语义错乱。
     const fallbackIsLossless = requests.length === 1 && canUseGenericOneBotFallback(contents);
+    const forwardFallback = requests.length === 1 && activeRequest.action.includes('_forward_msg') ? getNativeForwardFallbackRequest(contents, target) : null;
+
+    // 服务端明确拒绝合并转发时，完整展开的正文仍可作为一条普通原生消息送达。
+    // 这尤其覆盖 OneBot 私聊未实现 send_private_forward_msg 的情况（锅巴登录）。
+    if ((isUnsupportedOneBotActionError(err) || err?.oneBotActionRejected === true) && forwardFallback) {
+      logger.warn(`[bridge] OneBot 拒绝 ${activeRequest.action}，转用完整展开的原生普通消息: ${describeOneBotError(err)}`);
+
+      try {
+        const result = await sendNativeForward(client, forwardFallback);
+
+        oneBotTrace(`forward fallback success ${summarizeNativeOneBotRequest(forwardFallback)}`);
+
+        return { handled: true, result };
+      } catch (fallbackError: any) {
+        logger.error(`[bridge] OneBot 转发展开消息发送失败: ${summarizeNativeOneBotRequest(forwardFallback)}; ${describeOneBotError(fallbackError)}`);
+        throw fallbackError;
+      }
+    }
 
     if (isUnsupportedOneBotActionError(err)) {
       if (fallbackIsLossless) {
