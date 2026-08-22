@@ -729,6 +729,60 @@ async function serializeReplyMediaFile(value: unknown): Promise<string> {
   }
 }
 
+/**
+ * 合并转发节点不会再经过普通 ReplyContent 的图片/语音/视频序列化分支。
+ * 因而要在 Worker（文件实际所在进程）内递归处理节点里的媒体，不能把 macOS
+ * 本地绝对路径发给远端 OneBot 服务。字段形状仍保持 icqq，父进程会统一转换为
+ * OneBot 的 { type, data } 段结构。
+ */
+async function serializeForwardSendable(value: any): Promise<any> {
+  if (Buffer.isBuffer(value)) {
+    return value.toString('base64');
+  }
+  if (Array.isArray(value)) {
+    return Promise.all(value.map(serializeForwardSendable));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  const type = String(value.type ?? '');
+  const copy: any = { ...value };
+
+  if (['image', 'flash', 'record', 'video'].includes(type)) {
+    if (value.data && typeof value.data === 'object' && !Array.isArray(value.data)) {
+      copy.data = { ...value.data };
+      if (copy.data.file !== undefined) {
+        copy.data.file = await serializeReplyMediaFile(copy.data.file);
+      }
+    } else if (copy.file !== undefined) {
+      copy.file = await serializeReplyMediaFile(copy.file);
+    }
+  }
+
+  return copy;
+}
+
+function serializeForwardNodes(nodes: any[]): Promise<any[]> {
+  return Promise.all(
+    nodes.map(async node => {
+      const hasNodeData = node?.type === 'node' && node?.data && typeof node.data === 'object';
+      const source = hasNodeData ? node.data : node;
+
+      if (!source || typeof source !== 'object') {
+        return node;
+      }
+
+      const copy: any = { ...source };
+      const key = source.content !== undefined ? 'content' : 'message';
+
+      copy[key] = await serializeForwardSendable(source[key] ?? '');
+
+      return hasNodeData ? { ...node, data: copy } : copy;
+    })
+  );
+}
+
 async function serializeReplyContent(msg: any): Promise<ReplyContent[]> {
   if (typeof msg === 'string') {
     return [{ type: 'text', data: msg }];
@@ -743,13 +797,14 @@ async function serializeReplyContent(msg: any): Promise<ReplyContent[]> {
   }
   if (msg && typeof msg === 'object') {
     if (Array.isArray(msg.__forwardNodes)) {
-      const fallback = normalizeReplyContents(await serializeReplyContent(msg.__forwardParts ?? buildForwardMsgParts(msg.__forwardNodes)));
+      const nodes = await serializeForwardNodes(msg.__forwardNodes);
+      const fallback = normalizeReplyContents(await serializeReplyContent(msg.__forwardParts ?? buildForwardMsgParts(nodes)));
 
       return [
         {
           type: 'forward',
           data: String(msg.data ?? msg.toString?.() ?? ''),
-          nodes: msg.__forwardNodes,
+          nodes,
           fallback
         }
       ];
@@ -759,10 +814,12 @@ async function serializeReplyContent(msg: any): Promise<ReplyContent[]> {
     }
 
     switch (msg.type) {
-      case 'image': {
+      case 'image':
+      case 'flash': {
         const file = await serializeReplyMediaFile(msg.file);
+        const params = pickSegmentParams(msg, ['cache', 'proxy', 'timeout', 'type', 'subType', 'summary']);
 
-        return [{ type: 'image', data: file, params: pickSegmentParams(msg, ['cache', 'proxy', 'timeout', 'type', 'subType', 'summary']) }];
+        return [{ type: 'image', data: file, params: msg.type === 'flash' ? { ...params, type: 'flash' } : params }];
       }
       case 'at':
         return [{ type: 'at', data: String(msg.qq ?? msg.data?.qq ?? '') }];

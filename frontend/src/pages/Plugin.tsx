@@ -208,6 +208,7 @@ export default function Plugin() {
   const [confirmAction, setConfirmAction] = useState<{ action: string; label: string; extra?: Record<string, string> } | null>(null);
   const [lastAction, setLastAction] = useState('');
   const archiveInputRef = useRef<HTMLInputElement>(null);
+  const uploadDirInputRef = useRef<HTMLInputElement>(null);
 
   const showMessage = (msg: string) => {
     setMessage(msg);
@@ -319,12 +320,20 @@ export default function Plugin() {
     if (archiveLoading || isDesktopRuntime) {
       return;
     }
+    const dirName = uploadDirName.trim();
+
+    if (!dirName) {
+      showMessage('请先手动填写插件目标目录名；不要根据 ZIP 文件名自动判断');
+      uploadDirInputRef.current?.focus();
+
+      return;
+    }
 
     setArchiveFile(file);
     setArchiveLoading('upload');
     setUploadProgress(0);
     try {
-      const list = await uploadPluginArchive(file, uploadDirName, setUploadProgress);
+      const list = await uploadPluginArchive(file, dirName, setUploadProgress);
 
       setPluginArchives(list);
       setUploadDirName('');
@@ -345,6 +354,12 @@ export default function Plugin() {
     if (!file) {
       return;
     }
+    if (!uploadDirName.trim()) {
+      showMessage('请先手动填写插件目标目录名；ZIP 中常见的 -main、-master 不是安装目录名');
+      uploadDirInputRef.current?.focus();
+
+      return;
+    }
     if (!/\.zip$/i.test(file.name)) {
       showMessage('仅支持上传 .zip 压缩包');
 
@@ -357,6 +372,17 @@ export default function Plugin() {
     }
 
     void uploadArchiveFile(file);
+  };
+
+  const openArchivePicker = () => {
+    if (!uploadDirName.trim()) {
+      showMessage('请先手动填写插件目标目录名；ZIP 中常见的 -main、-master 不是安装目录名');
+      uploadDirInputRef.current?.focus();
+
+      return;
+    }
+
+    archiveInputRef.current?.click();
   };
 
   const handleArchiveExtract = async (id: string) => {
@@ -525,17 +551,17 @@ export default function Plugin() {
                   : 'miao-plugin 被视为必装插件。未安装时，部分能力可能出现异常或不可用。'}
             </div>
 
-            <div className='flex items-start gap-3'>
+            <div className='relative flex items-start gap-3'>
               <div className='w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0' style={{ background: 'rgba(128,128,128,.06)' }}>
                 {PLUGIN_ICONS[requiredPlugin.dirName] ?? '🐱'}
               </div>
-              <div className='flex-1 min-w-0'>
+              <div className='flex-1 min-w-0 pr-24'>
                 <div className='flex items-center gap-2'>
                   <span className='text-[13px] font-semibold truncate'>{requiredPlugin.label}</span>
                   {requiredPlugin.installed && <span className='shrink-0 w-1.5 h-1.5 rounded-full bg-green-500' title='已安装' />}
                 </div>
                 <div className='text-[11px] opacity-40 mt-0.5'>{PLUGIN_DESC[requiredPlugin.dirName] ?? requiredPlugin.aliases.join(' / ')}</div>
-                <div className='flex items-center gap-1.5 mt-2'>
+                <div className='absolute right-0 top-0 flex items-center gap-1.5'>
                   {!requiredPlugin.installed && (
                     <Button
                       className='px-3 py-1 text-[11px] rounded-lg font-medium'
@@ -610,20 +636,20 @@ export default function Plugin() {
                             const canUpdate = Boolean(installedPlugin?.isGit);
 
                             return (
-                              <PrimaryDiv key={p.dirName} className='px-4 py-3 flex items-start gap-3'>
+                              <PrimaryDiv key={p.dirName} className='relative px-4 py-3 flex items-start gap-3'>
                                 <div
                                   className='w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0'
                                   style={{ background: 'rgba(128,128,128,.06)' }}
                                 >
                                   {PLUGIN_ICONS[p.dirName] ?? '🧩'}
                                 </div>
-                                <div className='flex-1 min-w-0'>
+                                <div className='flex-1 min-w-0 pr-20'>
                                   <div className='flex items-center gap-2'>
                                     <span className='text-[13px] font-semibold truncate'>{p.label}</span>
                                     <span className='shrink-0 w-1.5 h-1.5 rounded-full bg-green-500' title='已安装' />
                                   </div>
                                   <div className='text-[11px] opacity-40 mt-0.5 line-clamp-1'>{PLUGIN_DESC[p.dirName] ?? p.aliases.join(' / ')}</div>
-                                  <div className='flex items-center gap-1.5 mt-1.5'>
+                                  <div className='absolute right-4 top-3 flex items-center gap-1.5'>
                                     {canUpdate && (
                                       <Button
                                         className='px-2.5 py-1 text-[11px] rounded-lg font-medium'
@@ -672,20 +698,20 @@ export default function Plugin() {
                       children: (
                         <div className='grid grid-cols-1 xl:grid-cols-2 gap-px' style={{ background: 'rgba(128,128,128,.06)' }}>
                           {extraInstalled.map(p => (
-                            <PrimaryDiv key={p.name} className='px-4 py-3 flex items-start gap-3'>
+                            <PrimaryDiv key={p.name} className='relative px-4 py-3 flex items-start gap-3'>
                               <div
                                 className='w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0'
                                 style={{ background: 'rgba(128,128,128,.06)' }}
                               >
                                 🧩
                               </div>
-                              <div className='flex-1 min-w-0'>
+                              <div className='flex-1 min-w-0 pr-20'>
                                 <div className='flex items-center gap-2'>
                                   <span className='text-[13px] font-semibold truncate'>{p.name}</span>
                                   <span className='shrink-0 w-1.5 h-1.5 rounded-full bg-green-500' title='已安装' />
                                 </div>
                                 <div className='text-[11px] opacity-40 mt-0.5 line-clamp-1'>第三方插件</div>
-                                <div className='flex items-center gap-1.5 mt-1.5'>
+                                <div className='absolute right-4 top-3 flex items-center gap-1.5'>
                                   {p.isGit && (
                                     <Button
                                       className='px-2.5 py-1 text-[11px] rounded-lg font-medium'
@@ -752,16 +778,16 @@ export default function Plugin() {
               children: (
                 <div className='grid grid-cols-1 xl:grid-cols-2 gap-px' style={{ background: 'rgba(128,128,128,.06)' }}>
                   {items.map(p => (
-                    <PrimaryDiv key={p.dirName} className='px-4 py-3 flex items-start gap-3'>
+                    <PrimaryDiv key={p.dirName} className='relative px-4 py-3 flex items-start gap-3'>
                       <div className='w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0' style={{ background: 'rgba(128,128,128,.06)' }}>
                         {PLUGIN_ICONS[p.dirName] ?? '🧩'}
                       </div>
-                      <div className='flex-1 min-w-0'>
+                      <div className='flex-1 min-w-0 pr-20'>
                         <div className='flex items-center gap-2'>
                           <span className='text-[13px] font-semibold truncate'>{p.label}</span>
                         </div>
                         <div className='text-[11px] opacity-40 mt-0.5 line-clamp-1'>{PLUGIN_DESC[p.dirName] ?? p.aliases.join(' / ')}</div>
-                        <div className='flex items-center gap-1.5 mt-1.5'>
+                        <div className='absolute right-4 top-3 flex items-center gap-1.5'>
                           <Button
                             className='px-3 py-1 text-[11px] rounded-lg font-medium'
                             onClick={() => sendAction('install_plugin', `安装 ${p.label}`, { plugin: p.aliases[0] })}
@@ -816,11 +842,11 @@ export default function Plugin() {
                 children: (
                   <div className='grid grid-cols-1 xl:grid-cols-2 gap-px' style={{ background: 'rgba(128,128,128,.06)' }}>
                     {items.map(item => (
-                      <PrimaryDiv key={`${item.repoUrl}-${item.category}`} className='px-4 py-3 flex items-start gap-3'>
+                      <PrimaryDiv key={`${item.repoUrl}-${item.category}`} className='relative px-4 py-3 flex items-start gap-3'>
                         <div className='w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0' style={{ background: 'rgba(128,128,128,.06)' }}>
                           {PLUGIN_ICONS[item.dirName] ?? '🌐'}
                         </div>
-                        <div className='flex-1 min-w-0'>
+                        <div className='flex-1 min-w-0 pr-20'>
                           <div className='flex items-center gap-2 flex-wrap'>
                             <span className='text-[13px] font-semibold truncate'>{item.label}</span>
                             <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>{item.category}</TagDiv>
@@ -829,7 +855,7 @@ export default function Plugin() {
                           <div className='text-[10px] opacity-30 mt-1'>
                             作者: {item.author || '未知'} · {item.dirName}
                           </div>
-                          <div className='flex items-center gap-1.5 mt-2'>
+                          <div className='absolute right-4 top-3 flex items-center gap-1.5'>
                             <Button
                               className='px-3 py-1 text-[11px] rounded-lg font-medium'
                               onClick={() => sendAction('install_plugin', `安装 ${item.label}`, { plugin: item.repoUrl })}
@@ -887,16 +913,22 @@ export default function Plugin() {
                 上传 ZIP 保存到压缩包列表，再点击「解压安装」写入 plugins/；支持反复解压覆盖已有文件。解压时需先停止 Yunzai。
               </div>
 
-              <div>
-                <div className='text-[11px] opacity-45 mb-1'>目标目录名（可选）</div>
+              <div className='rounded-xl border border-amber-500/35 bg-amber-500/5 px-3 py-3'>
+                <div className='text-[12px] font-semibold text-amber-500 mb-1'>目标目录名（必须手动填写）</div>
                 <Input
+                  ref={uploadDirInputRef}
                   type='text'
                   value={uploadDirName}
                   onChange={e => setUploadDirName(e.target.value)}
-                  placeholder='留空自动识别压缩包内插件目录'
-                  className='w-full px-3 py-1.5 text-sm rounded-lg'
+                  placeholder='例如：miao-plugin'
+                  required
+                  aria-describedby='plugin-dir-name-warning'
+                  className={`w-full px-3 py-1.5 text-sm rounded-lg ${uploadDirName.trim() ? '' : 'border border-amber-500/50'}`}
                 />
-                <div className='text-[10px] opacity-35 mt-1'>不填写时，将优先使用压缩包内顶层目录名，其次使用 ZIP 文件名。</div>
+                <div id='plugin-dir-name-warning' className='text-[11px] leading-5 text-amber-500/90 mt-2'>
+                  请填写期望安装到 <code>plugins/</code> 下的实际目录名。GitHub 下载包常带 <code>-main</code>、<code>-master</code>{' '}
+                  后缀，它们通常不是插件目录名；系统不会根据 ZIP 文件名自动纠正，请确认后再上传。
+                </div>
               </div>
 
               <input
@@ -909,12 +941,12 @@ export default function Plugin() {
               <div
                 role='button'
                 tabIndex={0}
-                className={`block rounded-lg border border-dashed px-3 py-4 text-center cursor-pointer transition-opacity ${isArchiveDragActive ? 'border-current opacity-100' : 'border-current/20 hover:opacity-80'}`}
-                onClick={() => archiveInputRef.current?.click()}
+                className={`block rounded-lg border border-dashed px-3 py-4 text-center cursor-pointer transition-opacity ${!uploadDirName.trim() ? 'border-amber-500/40 opacity-60' : isArchiveDragActive ? 'border-current opacity-100' : 'border-current/20 hover:opacity-80'}`}
+                onClick={openArchivePicker}
                 onKeyDown={event => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
-                    archiveInputRef.current?.click();
+                    openArchivePicker();
                   }
                 }}
                 onDragEnter={event => {
@@ -938,7 +970,9 @@ export default function Plugin() {
                     ? `正在上传 ${archiveFile?.name ?? ''}`
                     : isArchiveDragActive
                       ? '松开以立即上传 ZIP 压缩包'
-                      : '选择或拖入插件 ZIP 压缩包'}
+                      : uploadDirName.trim()
+                        ? '选择或拖入插件 ZIP 压缩包'
+                        : '请先填写目标目录名，再选择或拖入 ZIP 压缩包'}
                 </div>
                 <div className='text-[11px] opacity-45 mt-1'>选择或拖入后会立即上传；最大 {MAX_PLUGIN_ARCHIVE_SIZE_MB}MB，每次上传都会追加到压缩包列表</div>
               </div>

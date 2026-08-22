@@ -439,9 +439,21 @@ export default function Repo({ section }: { section: string }) {
             </div>
 
             <div className='rounded-xl border border-current/10 px-3 py-3 space-y-3'>
-              <div>
-                <div className='text-sm font-semibold'>{ARCHIVE_TARGETS[repoTab].label} 压缩包</div>
-                <div className='text-[11px] opacity-45 mt-0.5'>{ARCHIVE_TARGETS[repoTab].description}；支持反复解压覆盖已有文件。</div>
+              <div className='flex flex-wrap items-start justify-between gap-2'>
+                <div>
+                  <div className='text-sm font-semibold'>{ARCHIVE_TARGETS[repoTab].label} 压缩包</div>
+                  <div className='text-[11px] opacity-45 mt-0.5'>{ARCHIVE_TARGETS[repoTab].description}；支持反复解压覆盖已有文件。</div>
+                </div>
+                {currentArchiveStatus.archive && (
+                  <Button
+                    type='button'
+                    className='px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0'
+                    onClick={() => void handleArchiveExtract()}
+                    disabled={!!archiveLoading}
+                  >
+                    {archiveLoading === 'extract' ? '解压中...' : currentArchiveStatus.extracted ? '重新解压' : '解压压缩包'}
+                  </Button>
+                )}
               </div>
 
               <input
@@ -486,19 +498,6 @@ export default function Repo({ section }: { section: string }) {
                       : `选择或拖入 ${ARCHIVE_TARGETS[repoTab].label} ZIP 压缩包`}
                 </div>
                 <div className='text-[11px] opacity-45 mt-1'>选择或拖入后会立即上传；最大 {MAX_REPOSITORY_ARCHIVE_SIZE_MB}MB，同类型上传会覆盖已保存压缩包</div>
-              </div>
-
-              <div className='flex flex-wrap items-center gap-2'>
-                {currentArchiveStatus.archive && (
-                  <Button
-                    type='button'
-                    className='px-3 py-1.5 rounded-lg text-xs font-semibold'
-                    onClick={() => void handleArchiveExtract()}
-                    disabled={!!archiveLoading}
-                  >
-                    {archiveLoading === 'extract' ? '解压中...' : currentArchiveStatus.extracted ? '重新解压' : '解压压缩包'}
-                  </Button>
-                )}
               </div>
 
               {uploadProgress !== null && (

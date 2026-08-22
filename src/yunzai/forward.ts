@@ -26,6 +26,148 @@ export type NativeMessageRequest = {
 
 export type NativeOneBotRequest = NativeForwardRequest | NativeMessageRequest;
 
+type OneBotSegment = { type: string; data: Record<string, any> };
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function withoutType(value: Record<string, any>): Record<string, any> {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'type'));
+}
+
+function withDefinedValues(value: Record<string, any>, keys: string[]): Record<string, any> {
+  return Object.fromEntries(keys.filter(key => value[key] !== undefined && value[key] !== null).map(key => [key, value[key]]));
+}
+
+/**
+ * icqq 的 Sendable 与 OneBot 11 的 message 都允许字符串或消息段数组，但段对象
+ * 的字段布局不同：icqq 使用外层 text/file/message，OneBot 11 使用 data.text /
+ * data.file / node.data.content。所有转发节点和 raw 段必须经过此处，不能分散
+ * 在调用点猜字段。
+ */
+export function toOneBotSegment(value: unknown): OneBotSegment {
+  if (typeof value === 'string') {
+    return { type: 'text', data: { text: value } };
+  }
+
+  if (!isRecord(value)) {
+    return { type: 'text', data: { text: String(value ?? '') } };
+  }
+
+  const type = String(value.type ?? 'text');
+  const hasOneBotData = isRecord(value.data);
+  const source = hasOneBotData ? value.data : withoutType(value);
+
+  // 已是 OneBot 段时只做媒体来源规范化，避免重写实现商扩展字段。
+  if (hasOneBotData && type !== 'node') {
+    const data = { ...source };
+
+    if (['image', 'record', 'video', 'flash'].includes(type) && data.file !== undefined) {
+      data.file = normalizeOneBotMediaSource(data.file);
+    }
+    if (type === 'json' && typeof data.data !== 'string') {
+      data.data = JSON.stringify(data.data ?? '');
+    }
+    if (type === 'poke') {
+      data.type = String(data.type ?? 1);
+      data.id = String(data.id ?? '');
+    }
+    if (type === 'location') {
+      data.lon ??= data.lng;
+      delete data.lng;
+    }
+    if (type === 'music' && data.type === undefined && data.platform !== undefined) {
+      data.type = data.platform;
+      delete data.platform;
+    }
+
+    if (type === 'flash') {
+      data.type ??= 'flash';
+
+      return { type: 'image', data };
+    }
+
+    return { type, data };
+  }
+
+  switch (type) {
+    case 'text':
+      return { type: 'text', data: { text: String(source.text ?? '') } };
+    case 'at':
+      return { type: 'at', data: { qq: String(source.qq ?? source.id ?? '') } };
+    case 'face':
+    case 'sface':
+      return { type, data: withDefinedValues(source, ['id', 'text']) };
+    case 'image':
+    case 'flash':
+    case 'record':
+    case 'video': {
+      const data = withDefinedValues(source, ['cache', 'proxy', 'timeout', 'type', 'subType', 'summary', 'magic']);
+
+      if (source.file !== undefined) {
+        data.file = normalizeOneBotMediaSource(source.file);
+      }
+
+      if (type === 'flash') {
+        data.type ??= 'flash';
+
+        return { type: 'image', data };
+      }
+
+      return { type, data };
+    }
+    case 'json':
+      return { type: 'json', data: { data: typeof source.data === 'string' ? source.data : JSON.stringify(source.data ?? '') } };
+    case 'xml':
+      return { type: 'xml', data: withDefinedValues({ ...source, data: String(source.data ?? '') }, ['data', 'id']) };
+    case 'reply':
+    case 'forward':
+      return { type, data: withDefinedValues(source, ['id']) };
+    case 'rps':
+    case 'dice':
+    case 'shake':
+      // OneBot 11 的 rps/dice/shake 没有可控的 id 参数；保留 id 会使严格实现拒绝请求。
+      return { type, data: {} };
+    case 'poke':
+      // icqq 仅暴露 id，而 OneBot 11 还要求 type。icqq 的 0~6 基础戳一戳
+      // 对应 QQ 基础类型 1；实现商提供的 type 则优先保留。
+      return { type: 'poke', data: { type: String(source.poke_type ?? source.pokeType ?? 1), id: String(source.id ?? '') } };
+    case 'share':
+      return { type: 'share', data: withDefinedValues(source, ['url', 'title', 'content', 'image']) };
+    case 'location':
+      return {
+        type: 'location',
+        data: withDefinedValues(
+          { lat: source.lat, lon: source.lon ?? source.lng, title: source.title ?? source.name, content: source.content ?? source.address },
+          ['lat', 'lon', 'title', 'content']
+        )
+      };
+    case 'music': {
+      const musicType = source.music_type ?? source.platform ?? source.type;
+
+      return { type: 'music', data: withDefinedValues({ ...source, type: musicType }, ['type', 'id', 'url', 'audio', 'title', 'content', 'image']) };
+    }
+    case 'node':
+      return toOneBotForwardNode(value);
+    default:
+      // bface、mirai、markdown 等并非 OneBot 11 核心段；若实现商支持其扩展，
+      // 仍按正确的 { type, data } 结构保留，绝不退化为文本。
+      return { type, data: source };
+  }
+}
+
+/** 将 icqq Sendable 转成 OneBot 自定义转发节点所要求的 content 字段。 */
+export function toOneBotMessage(value: unknown): string | OneBotSegment[] {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  const elements = Array.isArray(value) ? value : [value];
+
+  return elements.map(toOneBotSegment);
+}
+
 /**
  * Yunzai/icqq 的转发节点一般是 { user_id, nickname, message }，而 OneBot
  * send_*_forward_msg 要求 messages 中每项都是 { type: 'node', data: { ..., content } }。
@@ -40,7 +182,7 @@ function toOneBotForwardNode(node: any): { type: 'node'; data: Record<string, an
 
   const rawUserId = source.user_id ?? source.userId;
   const userId = Array.isArray(rawUserId) ? rawUserId[0] : rawUserId;
-  const content = source.content ?? source.message ?? '';
+  const content = toOneBotMessage(source.content ?? source.message ?? '');
   const data: Record<string, any> = {
     user_id: userId ?? '',
     nickname: String(source.nickname ?? source.name ?? ''),
@@ -305,7 +447,7 @@ function toOneBotSegments(contents: ReplyContent[]): any[] {
         break;
       case 'raw':
         if (content.nativeType && content.nativeData) {
-          result.push({ type: content.nativeType, data: content.nativeData });
+          result.push(toOneBotSegment({ type: content.nativeType, data: content.nativeData }));
         }
         break;
       default:

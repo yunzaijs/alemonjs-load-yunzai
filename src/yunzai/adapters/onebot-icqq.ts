@@ -234,13 +234,71 @@ export function createOneBotRuntime(deps: {
     return segs;
   }
 
+  /**
+   * OneBot 入站段是 { type, data }，icqq 消息链是 { type, text/file/qq/... }。
+   * 不能只展开 data：位置的 lon/lng、闪照 image.type，以及转发 node 的
+   * content/message 都有语义不同的字段名。
+   */
   function normalizeSegments(message: any[]): any[] {
     return message.map((seg: any) => {
-      if (seg.data && typeof seg.data === 'object') {
-        return { type: seg.type, ...seg.data };
+      if (!seg || typeof seg !== 'object' || !seg.data || typeof seg.data !== 'object' || Array.isArray(seg.data)) {
+        return seg;
       }
 
-      return seg;
+      const type = String(seg.type ?? '');
+      const data = { ...seg.data };
+
+      if (type === 'image' && data.type === 'flash') {
+        delete data.type;
+
+        return { type: 'flash', ...data };
+      }
+      if (type === 'location') {
+        const { lon, title, content, ...rest } = data;
+
+        return {
+          type,
+          ...rest,
+          lng: lon ?? data.lng,
+          name: title ?? data.name,
+          address: content ?? data.address
+        };
+      }
+      if (type === 'node' && data.content !== undefined) {
+        return {
+          type,
+          user_id: data.user_id,
+          nickname: data.nickname,
+          time: data.time,
+          message: Array.isArray(data.content) ? normalizeSegments(data.content) : data.content
+        };
+      }
+
+      return { type, ...data };
+    });
+  }
+
+  /** OneBot get_forward_msg 的 messages[] → icqq ForwardMessage 的可用字段集合。 */
+  function normalizeForwardMessages(result: any): any[] {
+    const payload = result?.data ?? result;
+    const messages = Array.isArray(payload?.messages) ? payload.messages : Array.isArray(payload) ? payload : [];
+
+    return messages.map((item: any) => {
+      const sender = item?.sender ?? {};
+      const content = item?.content ?? item?.message ?? '';
+      const message = Array.isArray(content) ? normalizeSegments(content) : typeof content === 'string' ? normalizeSegments(parseCQMessage(content)) : [];
+      const rawMessage = typeof content === 'string' ? content : extractText(message);
+
+      return {
+        user_id: item?.user_id ?? sender?.user_id ?? 0,
+        nickname: item?.nickname ?? sender?.nickname ?? '',
+        group_id: item?.group_id ?? sender?.group_id,
+        time: item?.time ?? 0,
+        seq: item?.seq ?? item?.message_seq ?? 0,
+        message,
+        raw_message: rawMessage,
+        toString: () => rawMessage
+      };
     });
   }
 
@@ -615,7 +673,9 @@ export function createOneBotRuntime(deps: {
       getGroupMemberInfo: (gid: number, uid: number) => callApi('getGroupMemberInfo', { group_id: gid, user_id: uid })
           .then((res: any) => normalizeMemberRecord(res?.data ?? {}))
           .catch(() => ({})),
-      getForwardMsg: (resId: string) => callApi('getForwardMsg', { id: resId }).catch(() => ({ message: [] })),
+      getForwardMsg: (resId: string) => callApi('getForwardMsg', { id: resId })
+          .then(normalizeForwardMessages)
+          .catch(() => []),
       getCookies: (domain?: string) => callApi('getCookies', { domain: domain ?? '' }).catch(() => ({ cookies: '' })),
       getCsrfToken: () => callApi('getCsrfToken').catch(() => ({ token: 0 })),
       sendLike: (uid: number, times = 10) => callApi('sendLike', { user_id: uid, times }).catch(() => false),
@@ -737,7 +797,7 @@ export function createOneBotRuntime(deps: {
     const normalizedMessage = normalizeSegments(message);
     const rawMessage = raw.raw_message ?? extractText(normalizedMessage);
     const replySegment = normalizedMessage.find((s: any) => s.type === 'reply');
-    const source =
+    const rawSource =
       raw.source ??
       (replySegment
         ? {
@@ -747,6 +807,10 @@ export function createOneBotRuntime(deps: {
             message: replySegment.message ?? ''
           }
         : undefined);
+    const source =
+      rawSource && typeof rawSource === 'object' && Array.isArray(rawSource.message)
+        ? { ...rawSource, message: normalizeSegments(rawSource.message) }
+        : rawSource;
 
     if (isGroup && groupId) {
       cacheGroupRecord(groupId, { group_name: raw.group_name });
