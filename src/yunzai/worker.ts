@@ -271,6 +271,78 @@ function injectGlobals(): void {
       return callApi('sendPrivateMsg', { user_id: uid, contents });
     },
 
+    /** TRSS/Yunzai 别名：好友私聊与私聊在本桥接层使用同一条通道。 */
+    sendFriendMsg: (uid: number, msg: any) => botInstance.sendPrivateMsg(uid, msg),
+
+    /**
+     * TRSS/Yunzai 主人消息快捷入口。
+     * 向当前 Yunzai 配置中的所有 masterQQ 发送，未配置主人时明确失败。
+     */
+    sendMasterMsg: (msg: any) => {
+      const masters = Array.isArray((globalThis as any)._yunzaiCfg?.masterQQ) ? (globalThis as any)._yunzaiCfg.masterQQ : [];
+
+      if (masters.length === 0) {
+        throw new Error('未配置 masterQQ，无法发送主人消息');
+      }
+
+      return Promise.all(masters.map((uid: any) => botInstance.sendPrivateMsg(Number(uid), msg)));
+    },
+
+    /** TRSS/Yunzai 日志别名，统一转入 Worker 日志通道。 */
+    makeLog: (level: string, ...args: any[]) => {
+      const method = typeof botInstance.logger?.[level] === 'function' ? botInstance.logger[level] : botInstance.logger.info;
+
+      return method(...args);
+    },
+
+    /**
+     * 将 Buffer/本地文件转换为 data URL；远程 URL 和 data URL 原样返回。
+     * 这是跨进程可用的安全降级，不伪造不存在的 HTTP 文件服务。
+     */
+    fileToUrl: async (file: any) => {
+      if (Buffer.isBuffer(file)) {
+        return `data:application/octet-stream;base64,${file.toString('base64')}`;
+      }
+
+      const value = String(file ?? '');
+
+      if (/^(https?:|data:|base64:|file:)/i.test(value)) {
+        return value;
+      }
+
+      if (value.startsWith('/')) {
+        try {
+          const body = await fs.promises.readFile(value);
+
+          return `data:application/octet-stream;base64,${body.toString('base64')}`;
+        } catch {
+          return value;
+        }
+      }
+
+      return value;
+    },
+
+    /**
+     * 原生 icqq/Yunzai 插件常用的通用 API 入口。
+     *
+     * 不能依赖兼容 Proxy 为该方法兜底：Proxy 只会返回空函数，插件随后
+     * 读取 result.data.xxx 时就会得到“缺失属性”警告，而且不会真正发起
+     * OneBot 请求。这里直接复用 Worker → bridge → OneBot 的双向 IPC 链路，
+     * 保留原始 API 返回结构（status/retcode/data）。
+     */
+    sendApi: (actionOrRequest: string | { action?: string; params?: Record<string, any> }, params: Record<string, any> = {}) => {
+      const action =
+        typeof actionOrRequest === 'object' && actionOrRequest !== null ? String(actionOrRequest.action ?? '').trim() : String(actionOrRequest ?? '').trim();
+      const requestParams = typeof actionOrRequest === 'object' && actionOrRequest !== null ? (actionOrRequest.params ?? {}) : params;
+
+      if (!action) {
+        return Promise.reject(new Error('sendApi 缺少 action'));
+      }
+
+      return callApi(action, requestParams);
+    },
+
     /** 获取群列表（填充 gl） */
     getGroupList: () => callApi('getGroupList')
         .then((res: any) => {
@@ -540,6 +612,30 @@ function injectGlobals(): void {
 
   Object.assign(botInstance, oneBotRuntime.createOneBotBotAdapter(botInstance));
 
+  // TRSS 的多 Bot 访问习惯：Bot.bots[uin] / Bot.bots.get(uin)。当前 Worker
+  // 只有一个受管 Bot，因此所有已知账号都安全地指向当前 Bot，不伪造多进程实例。
+  botInstance.bots = new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        if (prop === 'get') {
+          return () => g.Bot ?? botInstance;
+        }
+        if (prop === 'has') {
+          return () => true;
+        }
+        if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+          return g.Bot ?? botInstance;
+        }
+
+        return undefined;
+      },
+      has(_target, prop) {
+        return prop === 'get' || prop === 'has' || (typeof prop === 'string' && /^\d+$/.test(prop));
+      }
+    }
+  );
+
   Object.defineProperty(botInstance, 'uin', {
     get() {
       return uinList;
@@ -580,6 +676,10 @@ function injectGlobals(): void {
 
   // ── segment (icqq 消息段构造) ──
   g.segment = {
+    /** TRSS 扩展消息段：按其扁平字段约定构造。 */
+    custom: (type: string, data: any = {}) => ({ type, ...(data && typeof data === 'object' && !Array.isArray(data) ? data : { data }) }),
+    /** TRSS 原生消息段透传。 */
+    raw: (data: any) => ({ type: 'raw', data }),
     image: (file: any) => ({ type: 'image', file }),
     at: (qq: string | number, text?: string) => ({ type: 'at', qq, text: text ?? '' }),
     face: (id: number) => ({ type: 'face', id }),
@@ -617,8 +717,8 @@ function injectGlobals(): void {
     /** 小表情（已废弃，兼容保留） */
     bface: (file: string, text?: string) => ({ type: 'bface', file, text: text ?? '' }),
     sface: (id: number, text?: string) => ({ type: 'sface', id, text: text ?? '' }),
-    /** Yunzai polyfill — 按钮消息（多数平台不支持，返回空字符串） */
-    button: () => '',
+    /** Yunzai/TRSS button 消息段；由 bridge 按目标平台选择原生或文本降级。 */
+    button: (...data: any[]) => ({ type: 'button', data: data.length === 1 ? data[0] : data }),
     /** 转发消息节点（构建合并转发消息时使用） */
     // eslint-disable-next-line camelcase
     node: (user_id: any, nickname: string, content: any) => ({
@@ -839,6 +939,15 @@ async function serializeReplyContent(msg: any): Promise<ReplyContent[]> {
       }
       case 'json':
         return [{ type: 'json', data: typeof msg.data === 'string' ? msg.data : JSON.stringify(msg.data) }];
+      case 'button':
+        return [{ type: 'button', data: '', buttonData: msg.data }];
+      case 'markdown': {
+        const markdownData = msg.data?.content ?? msg.data ?? msg.content ?? '';
+
+        return [{ type: 'markdown', data: typeof markdownData === 'string' ? markdownData : JSON.stringify(markdownData), markdownData }];
+      }
+      case 'raw':
+        return [serializeNativeOnlySegment(msg)];
       case 'xml':
         return [{ type: 'xml', data: msg.data ?? '' }];
       case 'share':
@@ -848,7 +957,6 @@ async function serializeReplyContent(msg: any): Promise<ReplyContent[]> {
       case 'location':
       case 'dice':
       case 'rps':
-      case 'markdown':
       case 'mirai':
       case 'bface':
       case 'sface':
@@ -1097,6 +1205,22 @@ function injectMasterQQ(userId: number | string): void {
   }
 }
 
+/** 兼容 TRSS 的 cfg.getGroup(selfId, groupId) 调用签名。 */
+function installConfigCompatibility(cfg: any): void {
+  if (!cfg || typeof cfg.getGroup !== 'function' || cfg.__alemonGetGroupCompat) {
+    return;
+  }
+
+  try {
+    const getGroup = cfg.getGroup.bind(cfg);
+
+    cfg.getGroup = (first: any, second?: any, ...rest: any[]) => getGroup(second === undefined ? first : second, ...rest);
+    Object.defineProperty(cfg, '__alemonGetGroupCompat', { value: true, enumerable: false, configurable: false });
+  } catch {
+    log('warn', '[compat] cfg.getGroup 不可注入双参数兼容');
+  }
+}
+
 function resolveMasterFlag(data: IPCEventMessage['data']): boolean {
   return data.isMaster ?? data.IsMaster ?? false;
 }
@@ -1160,14 +1284,14 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
   //  路径 A: 有原始 OneBot 事件 → 真实数据构建
   // ══════════════════════════════════════════
   if (isOneBotPlatform(data.platform) && raw && typeof raw === 'object' && raw.post_type) {
-    return oneBotRuntime.buildOneBotEvent({ data, msgId, selfId, reply });
+    return decorateEvent(oneBotRuntime.buildOneBotEvent({ data, msgId, selfId, reply }), data);
   }
 
   // 非消息事件 → 跨平台降级构建
   const eventName = data.eventName ?? '';
 
   if (eventName && !isMessageEventName(eventName)) {
-    return buildFallbackNonMessageEvent(data, selfId, platformTag, reply, eventName);
+    return decorateEvent(buildFallbackNonMessageEvent(data, selfId, platformTag, reply, eventName), data);
   }
 
   // ══════════════════════════════════════════
@@ -1271,6 +1395,51 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
   e.original_msg = data.messageText;
   e.logText = `${platformTag}[${isGroup ? 'Group' : 'Private'}:${isGroup ? groupId : userId}] ${data.messageText}`;
   e.logFnc = '';
+
+  return decorateEvent(e, data);
+}
+
+/** 补齐 TRSS/Yunzai 常用事件别名，但不伪造不存在的 runtime 实例。 */
+function decorateEvent(e: any, data?: IPCEventMessage['data']): any {
+  if (!e) {
+    return e;
+  }
+
+  const isGroup = e.message_type === 'group' || Boolean(e.group_id);
+
+  e.isGroup ??= isGroup;
+  e.isPrivate ??= !isGroup;
+  e.atBot ??= Boolean(e.atme);
+  e.bot ??= (globalThis as any).Bot;
+
+  if (data?.interactionId) {
+    e.interaction_id ??= data.interactionId;
+    e.interactionId ??= data.interactionId;
+  }
+  if (data?.interactionData !== undefined) {
+    e.interaction_data ??= data.interactionData;
+    e.interactionData ??= data.interactionData;
+    if (typeof data.interactionData === 'string') {
+      try {
+        e.interaction ??= JSON.parse(data.interactionData);
+      } catch {
+        e.interaction ??= data.interactionData;
+      }
+    } else {
+      e.interaction ??= data.interactionData;
+    }
+  }
+  if (data?.interactionTarget !== undefined) {
+    e.interaction_target ??= data.interactionTarget;
+    e.interactionTarget ??= data.interactionTarget;
+  }
+
+  const buttonData = e.interaction?.button_data ?? e.interaction?.buttonData;
+
+  if (buttonData !== undefined) {
+    e.button_data ??= buttonData;
+    e.buttonData ??= buttonData;
+  }
 
   return e;
 }
@@ -1499,6 +1668,7 @@ async function main(): Promise<void> {
       const cfg = cfgMod.default ?? cfgMod.cfg;
 
       if (cfg) {
+        installConfigCompatibility(cfg);
         // 保存 cfg 引用供后续新增 master 时注入
         (globalThis as any)._yunzaiCfg = cfg;
         log('info', `Cfg 实例已获取，当前 masterQQ: [${cfg.masterQQ}]`);

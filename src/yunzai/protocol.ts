@@ -59,6 +59,12 @@ export interface IPCEventMessage {
     // ── @提及信息（跨平台提取，无 rawEvent 时用于构建 at 段） ──
     /** 被@的用户列表 */
     atUsers?: { userId: string; userName?: string }[];
+    /** AlemonJS 交互回执 ID */
+    interactionId?: string;
+    /** 平台交互数据，QQ Bot 通常为 JSON 字符串 */
+    interactionData?: any;
+    /** 交互目标范围及目标 ID */
+    interactionTarget?: any;
 
     // ── OneBot 原始事件（仅 QQ/OneBot 平台） ──
     /** 完整的 OneBot 标准事件对象，包含 message 段、sender 详情等 */
@@ -161,7 +167,7 @@ export type WorkerToParent = IPCReady | IPCReply | IPCError | IPCLog | IPCDone |
 
 /** 序列化后的回复内容 */
 export interface ReplyContent {
-  type: 'text' | 'image' | 'at' | 'face' | 'forward' | 'record' | 'video' | 'json' | 'xml' | 'quote' | 'raw' | 'other';
+  type: 'text' | 'image' | 'at' | 'face' | 'forward' | 'record' | 'video' | 'json' | 'xml' | 'quote' | 'button' | 'markdown' | 'raw' | 'other';
   /** 文本内容 / base64 图片 / 文件路径 / JSON 数据 */
   data: string;
   /** 原始合并转发节点，仅 OneBot 原生合并转发发送时使用 */
@@ -176,4 +182,8 @@ export interface ReplyContent {
   nativeType?: string;
   /** 原生段的完整 data 对象；仅走原生 OneBot 通道，必须保持 IPC 可序列化 */
   nativeData?: Record<string, unknown>;
+  /** Yunzai button 段的原始 data；仅 qq-bot 平台转换为 AlemonJS BT.group */
+  buttonData?: unknown;
+  /** Yunzai/TRSS Markdown 段的结构化内容 */
+  markdownData?: unknown;
 }

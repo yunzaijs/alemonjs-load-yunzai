@@ -324,7 +324,7 @@ async function sendDirectContents(contents: ReplyContent[], target: NativeForwar
     return native.result;
   }
 
-  const format = contentsToFormat(contents);
+  const format = contentsToFormat(contents, event?.Platform);
   const result = target.isPrivate ? await sendToUser(String(target.userId), format.value) : await sendToChannel(String(target.groupId), format.value);
 
   assertMessageSendSucceeded(result);
@@ -356,7 +356,7 @@ async function sendReplyWithContext(reply: IPCReply, ctx: { message: ReturnType<
       return;
     }
 
-    const format = contentsToFormat(reply.contents);
+    const format = contentsToFormat(reply.contents, event?.Platform);
 
     if (event && isOneBotPlatform(event.Platform)) {
       oneBotTrace(`generic format ${describeFormatContents(format.value)}`);
@@ -463,7 +463,77 @@ function bindQueueListener(): void {
 
 // ━━━━━━━━━━━ ReplyContent → Format 转换 ━━━━━━━━━━━
 
-function appendContentsToFormat(format: InstanceType<typeof Format>, contents: ReplyContent[]): void {
+type ButtonSpec = {
+  title: string;
+  data: string;
+  options?: Record<string, any>;
+};
+
+function normalizeButtonSpecs(value: any): ButtonSpec[][] {
+  const source = Array.isArray(value) ? value : [value];
+  const rows = source.length > 0 && source.every(item => Array.isArray(item)) ? source : [source];
+
+  return rows.map(row => row
+      .flatMap((item: any) => {
+        if (item && typeof item === 'object' && Array.isArray(item.buttons)) {
+          return item.buttons;
+        }
+
+        return [item];
+      })
+      .map((item: any) => {
+        if (!item || typeof item !== 'object') {
+          return { title: String(item ?? ''), data: String(item ?? '') };
+        }
+
+        const title = String(item.title ?? item.label ?? item.text ?? item.render_data?.label ?? item.value ?? '按钮');
+        const actionData = item.data ?? item.action?.data ?? item.options?.data ?? title;
+        const actionType = item.type ?? item.action?.type;
+        const type = actionType === 1 || actionType === 'link' ? 'link' : actionType === 0 || actionType === 'call' ? 'call' : 'command';
+        const options = {
+          ...(item.options ?? {}),
+          ...(item.render_data?.style !== undefined ? { style: item.render_data.style } : {}),
+          ...(item.action?.enter !== undefined ? { autoEnter: item.action.enter } : {}),
+          ...(item.action?.reply !== undefined ? { reply: item.action.reply } : {}),
+          type
+        };
+
+        return { title, data: typeof actionData === 'string' ? actionData : JSON.stringify(actionData), options };
+      })
+  );
+}
+
+function appendButtonToFormat(format: InstanceType<typeof Format>, value: any, platform?: string): void {
+  const rows = normalizeButtonSpecs(value);
+
+  if (platform !== 'qq-bot') {
+    const text = rows
+      .map(row => row.map(button => `[${button.title}]`).join(' '))
+      .filter(Boolean)
+      .join('\n');
+
+    if (text) {
+      format.addText(text);
+    }
+
+    return;
+  }
+
+  const group = Format.createButtonGroup();
+
+  for (const row of rows) {
+    group.addRow();
+    for (const button of row) {
+      group.addButton(button.title, button.data, button.options);
+    }
+  }
+
+  if (group.value.value.length > 0) {
+    format.addButtonGroup(group);
+  }
+}
+
+function appendContentsToFormat(format: InstanceType<typeof Format>, contents: ReplyContent[], platform?: string): void {
   for (const c of contents) {
     switch (c.type) {
       case 'text':
@@ -487,9 +557,19 @@ function appendContentsToFormat(format: InstanceType<typeof Format>, contents: R
       case 'forward':
         // 非 OneBot、原生 API 不可用或混合消息时，使用 Worker 提供的完整展平内容。
         if (c.fallback?.length) {
-          appendContentsToFormat(format, c.fallback);
+          appendContentsToFormat(format, c.fallback, platform);
         } else {
           format.addText(c.data || '[转发消息]');
+        }
+        break;
+      case 'button':
+        appendButtonToFormat(format, c.buttonData, platform);
+        break;
+      case 'markdown':
+        if (platform === 'qq-bot') {
+          format.addMarkdownOriginal(c.data);
+        } else {
+          format.addText(c.data);
         }
         break;
       case 'quote':
@@ -507,10 +587,10 @@ function appendContentsToFormat(format: InstanceType<typeof Format>, contents: R
 }
 
 /** 将 Worker 的 ReplyContent[] 转为 AlemonJS Format */
-function contentsToFormat(contents: ReplyContent[]): InstanceType<typeof Format> {
+function contentsToFormat(contents: ReplyContent[], platform?: string): InstanceType<typeof Format> {
   const format = Format.create();
 
-  appendContentsToFormat(format, contents);
+  appendContentsToFormat(format, contents, platform);
 
   return format;
 }
@@ -1071,6 +1151,9 @@ function dispatchEventToWorker(id: string, e: EventsEnum): void {
   // 转发给 Worker — 提取所有 AlemonJS 标准字段
   const atUsers = extractAtUsers(e);
   const rawEvent = extractRawEvent(e, e);
+  const interactionId = e.InteractionId ?? e.interactionId ?? '';
+  const interactionData = e.InteractionData ?? e.interactionData;
+  const interactionTarget = e.Target ?? e.InteractionTarget ?? e.interactionTarget;
 
   manager.send({
     type: 'event',
@@ -1090,6 +1173,9 @@ function dispatchEventToWorker(id: string, e: EventsEnum): void {
       isMaster: e.IsMaster ?? false,
       IsMaster: e.IsMaster ?? false,
       atUsers,
+      interactionId: interactionId ? String(interactionId) : undefined,
+      interactionData,
+      interactionTarget,
       rawEvent
     }
   });
