@@ -77,7 +77,7 @@
       "root": "dist"
     }
   },
-  "author": "ningmengchongshui",
+  "author": "yunzaijs",
   "bugs": "https://github.com/yunzaijs/alemonjs-load-yunzai/issues",
   "dependencies": {
     "@koa/multer": "^4.0.0",
@@ -121,5 +121,5 @@
     "url": "https://github.com/yunzaijs/alemonjs-load-yunzai.git"
   },
   "type": "module",
-  "version": "1.0.14"
+  "version": "1.0.15"
 }

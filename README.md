@@ -1,6 +1,16 @@
-# 阿柠檬-加载Yunzai
+# LoadYunzai
 
-这是一个桥接层，通过进程隔离 + IPC 协议，将 Yunzai-Bot 生态无缝桥接到现代 AlemonJS 框架上，同时提供了完整的安装管理、插件管理和跨平台消息适配能力。设计上做到了与 Yunzai 运行时的完全解耦。完全不需要有重启后导致账户异常和整个机器人不再响应的心智负担，因为Yunzai是被alemonjs托管起来的
+这是一个桥接层，通过进程隔离 + IPC 协议，将所有 Yunzai-Bot 版本的生态无缝桥接到现代 AlemonJS 框架的加载插件
+
+## 特性
+
+- 所有 Yunzai-Bot 版本的生态都能无缝桥接
+
+- 提供了完整的且不需要运行Yunzai就能进行管理的能力
+
+- 让 Yunzai-Bot 插件具备跨平台适配能力
+
+- 完全不需要有重启后，可能会导致账户异常和整个机器人不再响应的心智负担
 
 ## OneBot 兼容
 
@@ -14,6 +24,9 @@
 - OneBot adapter: [src/yunzai/adapters/onebot-icqq.ts](./src/yunzai/adapters/onebot-icqq.ts)
 - 事件桥接分流: [src/yunzai/bridge.ts](./src/yunzai/bridge.ts)
 - Worker 路由与通用兜底: [src/yunzai/worker.ts](./src/yunzai/worker.ts)
+
+全局变量、`Bot.icqq`、`segment`、`logger`、`redis` 和平台差异说明：
+[Yunzai 全局变量兼容说明](./docs/yunzai-global-compatibility.md)
 
 ### 安装
 
@@ -77,9 +90,10 @@ alemonjs-load-yunzai:
 
 ```yaml
 # https://alemonjs.com/docs/config
-redis:
-  host: 127.0.0.1
-  port: 6379
-  user: root
-  db: 0
+db:
+  redis:
+    host: 127.0.0.1
+    port: 6379
+    user: root
+    db: 0
 ```
