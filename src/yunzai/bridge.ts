@@ -631,7 +631,7 @@ async function handleApiRequest(req: IPCApiRequest, msgId?: string): Promise<voi
   const { reqId, action, params } = req;
 
   try {
-    const result = await dispatchApi(action, params, msgId);
+    const result = await dispatchApi(action, params, msgId, req.rawOneBot === true);
     const failure = getPlatformFailureSummary(result);
 
     if (failure) {
@@ -652,8 +652,25 @@ async function handleApiRequest(req: IPCApiRequest, msgId?: string): Promise<voi
  *
  * 普通消息可跨平台直发；管理与 OneBot 原生动作必须拥有精确 msgId 上下文。
  */
-async function dispatchApi(action: string, params: Record<string, any>, msgId?: string): Promise<any> {
+async function dispatchApi(action: string, params: Record<string, any>, msgId?: string, rawOneBot = false): Promise<any> {
   const getEvent = (_platform?: string) => getEventForApi(msgId);
+
+  if (rawOneBot) {
+    const event = getEvent(params.platform);
+
+    if (!event) {
+      throw new Error(`无可用事件上下文: ${action}`);
+    }
+    const client = getOneBotClient(event);
+
+    if (!client) {
+      throw new Error(`${action} 仅 OneBot v11 平台可用`);
+    }
+
+    const { platform: _platform, ...apiParams } = params;
+
+    return await client.send({ action, params: apiParams });
+  }
 
   switch (action) {
     // ─── 消息发送（不需要事件上下文） ───

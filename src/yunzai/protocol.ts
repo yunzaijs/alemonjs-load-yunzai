@@ -157,6 +157,8 @@ export interface IPCApiRequest {
   action: string;
   /** 请求参数 */
   params: Record<string, any>;
+  /** 是否严格按 OneBot v11 action 原样透传 */
+  rawOneBot?: boolean;
   /** 触发此 API 调用的消息 ID（精确关联事件上下文） */
   msgId?: string;
 }

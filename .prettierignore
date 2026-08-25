@@ -35,3 +35,5 @@ jsxp.config.tsx
 
 # 测试文件
 testone/
+
+/yarn

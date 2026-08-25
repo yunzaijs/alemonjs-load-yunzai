@@ -35,7 +35,10 @@ test('OneBot provider supports forward and quoted-message contract', { skip: !en
     action: 'send_group_msg',
     params: {
       group_id: groupId,
-      message: [{ type: 'reply', data: { id: groupMessageId } }, { type: 'text', data: { text: `quote ${timestamp}` } }]
+      message: [
+        { type: 'reply', data: { id: groupMessageId } },
+        { type: 'text', data: { text: `quote ${timestamp}` } }
+      ]
     }
   });
 

@@ -9,6 +9,7 @@
  *   injectGlobals → loadPlugin基类 → loadPluginsLoader → load() → 监听 IPC
  */
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createOneBotRuntime, isOneBotPlatform } from './adapters/onebot-icqq';
@@ -56,7 +57,7 @@ function handleReplyResult(msg: IPCReplyResult): void {
  * 向父进程发起 API 调用并等待结果
  * Worker 的 Bot / group / friend 代理对象通过此函数实现真实功能
  */
-function callApi(action: string, params: Record<string, any> = {}, timeout = 15_000): Promise<any> {
+function callApi(action: string, params: Record<string, any> = {}, timeout = 15_000, rawOneBot = false): Promise<any> {
   let context;
 
   try {
@@ -91,7 +92,7 @@ function callApi(action: string, params: Record<string, any> = {}, timeout = 15_
       }
     });
 
-    ipcSend({ type: 'api', reqId, action, params: requestParams, msgId: context?.msgId });
+    ipcSend({ type: 'api', reqId, action, params: requestParams, rawOneBot, msgId: context?.msgId });
   });
 }
 
@@ -196,6 +197,21 @@ function warnCompatMissing(kind: 'get' | 'call' | 'construct', label: string): v
 
 const wrapCompatValue = createCompatValueWrapper(warnCompatMissing);
 
+/**
+ * 加载 Miao-Yunzai 自带的 icqq 核心工具。
+ * jce/pb 等是纯数据编解码，可以安全复用；真正的 QQ SSO 连接仍不可从
+ * OneBot/qq-bot 适配器中伪造，因此 sendUni 会明确返回不支持错误。
+ */
+function loadIcqqModule(): any {
+  try {
+    const requireFromYunzai = createRequire(path.join(process.cwd(), 'package.json'));
+
+    return requireFromYunzai('icqq') ?? {};
+  } catch {
+    return {};
+  }
+}
+
 function injectGlobals(): void {
   const g = globalThis as any;
 
@@ -227,6 +243,7 @@ function injectGlobals(): void {
   // ── Bot 对象 ──
   // 通过 callApi 实现真实的 icqq API 调用，经由 IPC → AlemonJS → 平台适配器
   const uinList = new CompatUinList(10000);
+  const icqqModule = loadIcqqModule();
   const botInstance: any = {
     nickname: 'Yunzai',
     /** Yunzai 插件常用的 Bot.logger 全局日志入口 */
@@ -248,6 +265,12 @@ function injectGlobals(): void {
       sent_pkt_cnt: 0,
       lost_pkt_cnt: 0
     },
+    /** icqq 纯编解码工具兼容层；不代表当前平台建立了 icqq 长连接。 */
+    /** icqq 模块的静态类、segment、Parser、Converter、core 等兼容字段。 */
+    icqq: { ...icqqModule, core: icqqModule.core ?? {} },
+    /** icqq 底层 SSO 接口无法由 OneBot/qq-bot 适配器实现。 */
+    sendUni: () => Promise.reject(new Error('Bot.sendUni 在 AlemonJS 适配器中不可用，请改用 Bot.sendApi 或平台标准 API')),
+    sig: { seq: 0 },
     getFriendMap: () => botInstance.fl,
     getGroupMap: () => botInstance.gl,
 
@@ -340,7 +363,7 @@ function injectGlobals(): void {
         return Promise.reject(new Error('sendApi 缺少 action'));
       }
 
-      return callApi(action, requestParams);
+      return callApi(action, requestParams, 15_000, true);
     },
 
     /** 获取群列表（填充 gl） */
@@ -609,6 +632,9 @@ function injectGlobals(): void {
     },
     status: 11 // ONLINE
   };
+
+  // 让依赖 Bot.icqq.sendUni 的插件得到明确的能力边界，而不是缺失属性告警。
+  botInstance.icqq.sendUni = botInstance.sendUni;
 
   Object.assign(botInstance, oneBotRuntime.createOneBotBotAdapter(botInstance));
 
