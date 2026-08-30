@@ -74,6 +74,7 @@ export function getStatusSnapshotLocal() {
     label: p.label,
     aliases: p.aliases,
     repoUrl: p.repoUrl,
+    requires: p.requires,
     installed: installedSet.has(p.dirName)
   }));
 
@@ -130,6 +131,13 @@ export async function executeYunzaiActionLocal(data: PrimitiveRecord) {
       await manager.installDeps();
 
       return { message: '依赖安装完成' };
+    case 'install_dependency': {
+      const dependencyType = data.dependencyType === 'devDependencies' ? 'devDependencies' : 'dependencies';
+
+      await manager.installDependency(String(data.packageName ?? ''), String(data.version ?? ''), dependencyType);
+
+      return { message: `${String(data.packageName ?? '').trim()} 安装完成` };
+    }
     case 'cancel':
       if (manager.isBusy) {
         const taskName = manager.busyTaskName;

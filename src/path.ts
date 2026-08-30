@@ -37,7 +37,14 @@ function getConfig() {
 
 /** GitHub 代理前缀 */
 export function getGhProxy(): string {
-  return getConfig()?.gh_proxy ?? DEFAULT_GH_PROXY;
+  const configured = getConfig()?.gh_proxy;
+  const proxy = configured === undefined ? DEFAULT_GH_PROXY : String(configured).trim();
+
+  if (!proxy) {
+    return '';
+  }
+
+  return proxy.endsWith('/') ? proxy : `${proxy}/`;
 }
 
 /** 默认 Yunzai 仓库地址 */
@@ -82,60 +89,78 @@ export interface PluginInfo {
 }
 
 /** 插件定义：信息 + 所有别名 */
-export interface PluginDef extends PluginInfo {
+export interface PluginDef extends Omit<PluginInfo, 'dirName'> {
+  /** 可选：插件实际安装目录；省略时使用仓库名 */
+  dirName?: string;
   aliases: string[];
+  /** 运行前需要存在的插件目录名，仅用于提示，不会自动安装 */
+  requires?: string[];
   /** 仅在指定 Yunzai 发行版的推荐目录中展示 */
   variants?: YunzaiVariant[];
+}
+
+function repoDirName(repoUrl: string): string {
+  const cleanUrl = repoUrl
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\.git$/i, '');
+  const name = cleanUrl.split(/[/:]/).pop()?.trim() ?? '';
+
+  return name || 'unknown-plugin';
+}
+
+function resolvePluginDirName(plugin: Pick<PluginDef, 'dirName' | 'repoUrl'>): string {
+  return plugin.dirName?.trim() ?? repoDirName(plugin.repoUrl);
 }
 
 /** 内置插件列表（每个插件只定义一次） */
 const BUILTIN_PLUGINS: PluginDef[] = [
   {
     aliases: ['miao', 'miaomiao', '原神'],
-    dirName: 'miao-plugin',
     repoUrl: 'https://github.com/yoimiya-kokomi/miao-plugin.git',
     label: 'miao-plugin',
-    variants: ['miao']
+    variants: ['miao', 'trss']
   },
   {
     aliases: ['trss原神', 'trssgenshin', 'genshin'],
-    dirName: 'Yunzai-genshin',
+    // Yunzai-genshin 仓库内部固定引用 ./plugins/genshin，目录名必须保持为 genshin。
+    dirName: 'genshin',
     repoUrl: 'https://github.com/TimeRainStarSky/Yunzai-genshin.git',
     label: 'Yunzai-genshin',
+    requires: ['miao-plugin'],
     variants: ['trss']
   },
-  { aliases: ['starrail', '星铁'], dirName: 'StarRail-plugin', repoUrl: 'https://gitee.com/hewang1an/StarRail-plugin.git', label: 'StarRail-plugin' },
-  { aliases: ['zzz'], dirName: 'ZZZ-Plugin', repoUrl: 'https://gitee.com/bietiaop/ZZZ-Plugin.git', label: 'ZZZ-Plugin' },
-  { aliases: ['图鉴'], dirName: 'xiaoyao-cvs-plugin', repoUrl: 'https://cnb.cool/tar/xiaoyao-cvs-plugin.git', label: 'xiaoyao-cvs-plugin' },
-  { aliases: ['锅巴', 'guoba'], dirName: 'guoba-plugin', repoUrl: 'https://gitee.com/guoba-yunzai/guoba-plugin.git', label: 'guoba-plugin' },
-  { aliases: ['喵喵扩展', 'liangshi'], dirName: 'liangshi-calc', repoUrl: 'https://gitee.com/liangshi233/liangshi-calc.git', label: 'liangshi-calc' },
+  { aliases: ['starrail', '星铁'], repoUrl: 'https://gitee.com/hewang1an/StarRail-plugin.git', label: 'StarRail-plugin' },
+  { aliases: ['zzz'], repoUrl: 'https://gitee.com/bietiaop/ZZZ-Plugin.git', label: 'ZZZ-Plugin' },
+  { aliases: ['图鉴'], repoUrl: 'https://cnb.cool/tar/xiaoyao-cvs-plugin.git', label: 'xiaoyao-cvs-plugin' },
+  { aliases: ['锅巴', 'guoba'], repoUrl: 'https://gitee.com/guoba-yunzai/guoba-plugin.git', label: 'guoba-plugin' },
+  { aliases: ['喵喵扩展', 'liangshi'], repoUrl: 'https://gitee.com/liangshi233/liangshi-calc.git', label: 'liangshi-calc' },
   {
     aliases: ['明日方舟', '方舟', 'endfield'],
-    dirName: 'endfield-suzuki-plugin',
     repoUrl: 'https://github.com/yoshino-xiao7/endfield-suzuki-plugin.git',
     label: 'endfield-suzuki-plugin'
   },
-  { aliases: ['终末地', 'zmd'], dirName: 'zmd-plugin', repoUrl: 'https://github.com/Anon-deisu/zmd-plugin.git', label: 'zmd-plugin' },
-  { aliases: ['三角洲', 'delta'], dirName: 'delta-force-plugin', repoUrl: 'https://github.com/Dnyo666/delta-force-plugin.git', label: 'delta-force-plugin' },
+  { aliases: ['终末地', 'zmd'], repoUrl: 'https://github.com/Anon-deisu/zmd-plugin.git', label: 'zmd-plugin' },
+  { aliases: ['三角洲', 'delta'], repoUrl: 'https://github.com/Dnyo666/delta-force-plugin.git', label: 'delta-force-plugin' },
   {
     aliases: ['王者荣耀', '王者'],
-    dirName: 'GloryOfKings-Plugin',
     repoUrl: 'https://gitee.com/Tloml-Starry/GloryOfKings-Plugin.git',
     label: 'GloryOfKings-Plugin'
   },
-  { aliases: ['尘白禁区', '尘白'], dirName: 'cb-plugin', repoUrl: 'https://github.com/Sakura1618/cb-plugin.git', label: 'cb-plugin' },
-  { aliases: ['鸣潮', 'waves'], dirName: 'waves-plugin', repoUrl: 'https://github.com/erzaozi/waves-plugin.git', label: 'waves-plugin' },
-  { aliases: ['重返未来', '1999'], dirName: '1999-plugin', repoUrl: 'https://gitee.com/fantasy-hx/1999-plugin.git', label: '1999-plugin' },
-  { aliases: ['库洛', 'kuro'], dirName: 'Yunzai-Kuro-Plugin', repoUrl: 'https://github.com/TomyJan/Yunzai-Kuro-Plugin.git', label: 'Yunzai-Kuro-Plugin' },
-  { aliases: ['光遇', 'sky'], dirName: 'Tlon-Sky', repoUrl: 'https://gitee.com/Tloml-Starry/Tlon-Sky.git', label: 'Tlon-Sky' }
+  { aliases: ['尘白禁区', '尘白'], repoUrl: 'https://github.com/Sakura1618/cb-plugin.git', label: 'cb-plugin' },
+  { aliases: ['鸣潮', 'waves'], repoUrl: 'https://github.com/erzaozi/waves-plugin.git', label: 'waves-plugin' },
+  { aliases: ['重返未来', '1999'], repoUrl: 'https://gitee.com/fantasy-hx/1999-plugin.git', label: '1999-plugin' },
+  { aliases: ['库洛', 'kuro'], repoUrl: 'https://github.com/TomyJan/Yunzai-Kuro-Plugin.git', label: 'Yunzai-Kuro-Plugin' },
+  { aliases: ['光遇', 'sky'], repoUrl: 'https://gitee.com/Tloml-Starry/Tlon-Sky.git', label: 'Tlon-Sky' }
 ];
 
 /** 展开别名数组为 alias → PluginInfo 的扁平映射 */
 function buildAliasMap(plugins: PluginDef[]): Record<string, PluginInfo> {
   const map: Record<string, PluginInfo> = {};
 
-  for (const { aliases, dirName, repoUrl, label } of plugins) {
-    const info: PluginInfo = { dirName, repoUrl, label };
+  for (const plugin of plugins) {
+    const { aliases, repoUrl, label } = plugin;
+    const info: PluginInfo = { dirName: resolvePluginDirName(plugin), repoUrl, label };
 
     for (const alias of aliases) {
       map[alias] = info;
@@ -154,7 +179,7 @@ const BUILTIN_PLUGIN_MAP = buildAliasMap(BUILTIN_PLUGINS);
  * alemonjs-load-yunzai:
  *   plugins:
  *     别名:
- *       dirName: 插件目录名
+ *       dirName: 插件目录名（可选，省略时使用仓库名）
  *       repoUrl: git仓库地址
  *       label: 显示名称
  *       aliases:          # 可选，额外别名
@@ -167,11 +192,16 @@ function getPluginAliasMap(): Record<string, PluginInfo> {
   const merged = { ...BUILTIN_PLUGIN_MAP };
 
   for (const [alias, raw] of Object.entries(custom)) {
-    if (raw && typeof raw === 'object' && (raw as any).dirName && (raw as any).repoUrl) {
+    if (raw && typeof raw === 'object' && (raw as any).repoUrl) {
+      const repoUrl = String((raw as any).repoUrl);
+      const dirName = resolvePluginDirName({
+        dirName: typeof (raw as any).dirName === 'string' ? (raw as any).dirName : undefined,
+        repoUrl
+      });
       const info: PluginInfo = {
-        dirName: (raw as any).dirName,
-        repoUrl: (raw as any).repoUrl,
-        label: (raw as any).label ?? (raw as any).dirName
+        dirName,
+        repoUrl,
+        label: (raw as any).label ?? dirName
       };
 
       merged[alias.toLowerCase()] = info;
@@ -193,13 +223,20 @@ function getPluginAliasMap(): Record<string, PluginInfo> {
  * 返回所有可用插件（内置 + 用户自定义），按 dirName 去重
  */
 export function getAllPlugins(variant?: YunzaiVariant): PluginDef[] {
-  const result: PluginDef[] = BUILTIN_PLUGINS.filter(plugin => !variant || !plugin.variants || plugin.variants.includes(variant));
-  const seen = new Set(result.map(p => p.dirName));
+  const result: PluginDef[] = BUILTIN_PLUGINS.filter(plugin => !variant || !plugin.variants || plugin.variants.includes(variant)).map(plugin => ({
+    ...plugin,
+    dirName: resolvePluginDirName(plugin)
+  }));
+  const seen = new Set(result.map(p => resolvePluginDirName(p)));
   const custom = getConfig()?.plugins ?? {};
 
   for (const [alias, raw] of Object.entries(custom)) {
-    if (raw && typeof raw === 'object' && (raw as any).dirName && (raw as any).repoUrl) {
-      const dirName = (raw as any).dirName as string;
+    if (raw && typeof raw === 'object' && (raw as any).repoUrl) {
+      const repoUrl = String((raw as any).repoUrl);
+      const dirName = resolvePluginDirName({
+        dirName: typeof (raw as any).dirName === 'string' ? (raw as any).dirName : undefined,
+        repoUrl
+      });
 
       if (seen.has(dirName)) {
         continue;
@@ -210,7 +247,7 @@ export function getAllPlugins(variant?: YunzaiVariant): PluginDef[] {
 
       result.push({
         dirName,
-        repoUrl: (raw as any).repoUrl,
+        repoUrl,
         label: (raw as any).label ?? dirName,
         aliases: [alias, ...extraAliases]
       });

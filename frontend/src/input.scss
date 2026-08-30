@@ -1,11 +1,43 @@
 @import './assets/styles/tailwindcss.css';
 @import url('./assets/styles/scrollbar.scss');
 
+button,
 input,
-div,
+select,
 textarea {
-  outline: 2px solid transparent !important;
-  outline-offset: 2px !important;
+  outline: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--alemonjs-button-bg-hover, #8f8c76);
+  outline-offset: 2px;
+}
+
+.feedback-info { background: rgba(59, 130, 246, .08); border: 1px solid rgba(59, 130, 246, .16); }
+.feedback-success { background: rgba(34, 197, 94, .08); border: 1px solid rgba(34, 197, 94, .16); }
+.feedback-error { background: rgba(239, 68, 68, .08); border: 1px solid rgba(239, 68, 68, .18); color: rgb(220 38 38); }
+.feedback-warning { background: rgba(245, 158, 11, .08); border: 1px solid rgba(245, 158, 11, .16); }
+.empty-state { border: 1px dashed rgba(128, 128, 128, .16); }
+.dependency-selected { background: var(--alemonjs-primary-bg, rgba(128, 128, 128, .14)); border: 1px solid var(--alemonjs-button-bg-hover, rgba(128, 128, 128, .25)); }
+.dependency-option { background: rgba(128, 128, 128, .04); border: 1px solid rgba(128, 128, 128, .1); opacity: .62; }
+.dependency-execute { background: linear-gradient(135deg, #d5c8b2, #8f8c76); }
+
+.plugin-card-action {
+  position: absolute;
+  right: 1rem;
+  top: .75rem;
+  display: flex;
+  align-items: center;
+  gap: .375rem;
+}
+
+@media (max-width: 639px) {
+  .plugin-card-action {
+    position: static;
+    width: 100%;
+    justify-content: flex-end;
+    margin-top: .5rem;
+  }
 }
 
 /* ── 全局过渡 ── */
@@ -65,13 +97,21 @@ textarea,
   }
 }
 
-@media (prefers-color-scheme: dark) {
+html.dark {
   .row-hover:hover {
     background-color: rgba(255, 255, 255, 0.04);
   }
 
   .card-hover:hover {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
   }
 }
 

@@ -1,5 +1,6 @@
 import { Button, PrimaryDiv, TagDiv } from '@alemonjs/react-ui';
 import { useEffect, useRef, useState } from 'react';
+import { ConfirmDialog, Feedback } from '../components/Ui';
 
 interface LogFileItem {
   name: string;
@@ -57,6 +58,9 @@ export default function Logs() {
     truncated: false,
     updatedAt: 0
   });
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [message, setMessage] = useState('');
+  const [messageKind, setMessageKind] = useState<'success' | 'error'>('success');
   const logContentRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -67,6 +71,13 @@ export default function Logs() {
     const handler = (data: Record<string, unknown>) => {
       if (data.type === 'yunzai.logs') {
         setLogViewer((data.data as LogViewerData) ?? { files: [], activeFile: '', content: '', truncated: false, updatedAt: Date.now() });
+      } else if (data.type === 'yunzai.logs.deleted') {
+        setLogViewer((data.data as LogViewerData) ?? { files: [], activeFile: '', content: '', truncated: false, updatedAt: Date.now() });
+        setMessageKind('success');
+        setMessage('日志已删除');
+      } else if (data.type === 'yunzai.result') {
+        setMessageKind('error');
+        setMessage((data.data as { message?: string })?.message ?? '日志删除失败');
       }
     };
 
@@ -107,26 +118,33 @@ export default function Logs() {
     logContentRef.current.scrollTop = logContentRef.current.scrollHeight;
   }, [logViewer.updatedAt, logViewer.content, followTail]);
 
+  const deleteLog = () => {
+    if (!deleteTarget) { return; }
+    window.API?.postMessage({ type: 'yunzai.logs.delete', data: { file: deleteTarget } });
+    setDeleteTarget(null);
+  };
+
   return (
-    <div className='py-2'>
+    <div className='py-2 flex-1 min-h-0 flex flex-col'>
+      {message && <Feedback kind={messageKind}>{message}</Feedback>}
       <PrimaryDiv
-        className='rounded-[22px] overflow-hidden min-h-[68vh] md:min-h-[72vh] flex flex-col md:flex-row'
+        className='rounded-[22px] overflow-hidden flex-1 min-h-0 flex flex-col md:flex-row mt-2'
         style={{ background: 'linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,.01))' }}
       >
         <div
-          className='border-b border-white/10 md:border-b-0 md:border-r overflow-y-auto md:w-[230px] lg:w-[250px] xl:w-[280px] md:shrink-0'
+          className='border-b border-white/10 md:border-b-0 md:border-r overflow-hidden md:w-[230px] lg:w-[250px] xl:w-[280px] md:shrink-0 md:min-h-0'
           style={{ background: 'rgba(255,255,255,.02)' }}
         >
           <div className='px-4 py-4 border-b border-white/10'>
             <div className='text-[15px] font-semibold tracking-tight'>日志文件</div>
             <div className='text-[11px] opacity-40 mt-1'>{logViewer.files.length} 个文件 · 自动按更新时间排序</div>
           </div>
-          <div className='p-2 flex gap-1.5 overflow-x-auto md:block md:space-y-1.5 md:overflow-x-visible'>
+          <div className='p-2 flex gap-1.5 overflow-x-auto md:block md:space-y-1.5 md:overflow-y-auto md:overflow-x-visible md:min-h-0 md:h-[calc(100%-73px)]'>
             {logViewer.files.length === 0 && <div className='px-2 py-3 text-[12px] opacity-40'>暂无日志文件</div>}
             {logViewer.files.map(file => (
-              <button
+              <div
                 key={file.name}
-                className={`shrink-0 min-w-[160px] sm:min-w-[180px] md:min-w-0 md:w-full text-left rounded-xl px-3 py-2.5 text-[12px] transition-all ${file.name === logViewer.activeFile ? 'opacity-100 shadow-sm' : 'opacity-60 hover:opacity-85'}`}
+                className={`shrink-0 min-w-[190px] sm:min-w-[210px] md:min-w-0 md:w-full rounded-xl px-3 py-2.5 text-[12px] transition-all flex items-center gap-2 ${file.name === logViewer.activeFile ? 'opacity-100 shadow-sm' : 'opacity-60 hover:opacity-85'}`}
                 style={
                   file.name === logViewer.activeFile
                     ? {
@@ -135,19 +153,23 @@ export default function Logs() {
                       }
                     : { background: 'rgba(255,255,255,.018)' }
                 }
-                onClick={() => setLogViewer(prev => ({ ...prev, activeFile: file.name }))}
               >
-                <div className='font-medium truncate'>{file.name}</div>
-                <div className='flex items-center justify-between gap-2 opacity-35 text-[10px] mt-1.5'>
-                  <span>{Math.max(1, Math.round(file.size / 1024))} KB</span>
-                  <span>{formatTime(file.updatedAt)}</span>
-                </div>
-              </button>
+                <button className='min-w-0 flex-1 text-left' onClick={() => setLogViewer(prev => ({ ...prev, activeFile: file.name }))}>
+                  <div className='font-medium truncate'>{file.name}</div>
+                  <div className='flex items-center justify-between gap-2 opacity-45 text-[10px] mt-1.5'>
+                    <span>{Math.max(1, Math.round(file.size / 1024))} KB</span>
+                    <span>{formatTime(file.updatedAt)}</span>
+                  </div>
+                </button>
+                <button type='button' aria-label={`删除日志 ${file.name}`} className='shrink-0 rounded-lg px-2 py-1 text-[11px] text-red-400 hover:bg-red-500/10' onClick={() => setDeleteTarget(file.name)}>
+                  删除
+                </button>
+              </div>
             ))}
           </div>
         </div>
 
-        <div className='flex-1 min-w-0 flex flex-col'>
+          <div className='flex-1 min-w-0 min-h-0 flex flex-col'>
           <div className='px-4 py-4 border-b border-white/10 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3'>
             <div className='min-w-0'>
               <div className='text-[15px] font-semibold tracking-tight truncate'>日志查看</div>
@@ -210,6 +232,14 @@ export default function Logs() {
           </div>
         </div>
       </PrimaryDiv>
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title='删除日志'
+        description={`确定删除“${deleteTarget ?? ''}”？删除后无法恢复。`}
+        confirmLabel='删除'
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={deleteLog}
+      />
     </div>
   );
 }

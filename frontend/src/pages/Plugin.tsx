@@ -1,6 +1,7 @@
-import { Button, Collapse, HeaderDiv, Input, Modal, NotificationDiv, PrimaryDiv, SecondaryDiv, TagDiv } from '@alemonjs/react-ui';
+import { Button, Collapse, HeaderDiv, Input, Modal, PrimaryDiv, SecondaryDiv, TagDiv } from '@alemonjs/react-ui';
 import { useEffect, useRef, useState } from 'react';
 import { deletePluginArchiveEntry, extractPluginArchiveEntry, getPluginArchiveEntries, type PluginArchiveEntry, uploadPluginArchive } from '../api/web-api';
+import { Feedback } from '../components/Ui';
 import { SmartDropdown } from './SmartDropdown';
 
 interface PluginItem {
@@ -14,6 +15,7 @@ interface CatalogItem {
   label: string;
   aliases: string[];
   repoUrl: string;
+  requires?: string[];
   installed: boolean;
 }
 
@@ -30,6 +32,7 @@ interface OnlineCatalogItem {
 /** 插件图标映射 */
 const PLUGIN_ICONS: Record<string, string> = {
   'miao-plugin': '🐱',
+  genshin: '🪄',
   'Yunzai-genshin': '🪄',
   'StarRail-plugin': '🚂',
   'ZZZ-Plugin': '🎮',
@@ -50,6 +53,7 @@ const PLUGIN_ICONS: Record<string, string> = {
 /** 插件简短描述 */
 const PLUGIN_DESC: Record<string, string> = {
   'miao-plugin': '原神面板查询、角色攻略、伤害计算等',
+  genshin: 'TRSS-Yunzai 原神查询与面板功能扩展',
   'Yunzai-genshin': 'TRSS-Yunzai 原神查询与面板功能扩展',
   'StarRail-plugin': '崩坏：星穹铁道攻略与数据查询',
   'ZZZ-Plugin': '绝区零游戏数据查询',
@@ -189,7 +193,7 @@ function RequiredPluginContent({
             {plugin.installed && <span className='shrink-0 w-1.5 h-1.5 rounded-full bg-green-500' title='已安装' />}
           </div>
           <div className='text-[11px] opacity-40 mt-0.5'>{PLUGIN_DESC[plugin.dirName] ?? plugin.aliases.join(' / ')}</div>
-          <div className='absolute right-0 top-0 flex items-center gap-1.5'>
+          <div className='plugin-card-action'>
             {!plugin.installed && (
               <Button
                 className='px-3 py-1 text-[11px] rounded-lg font-medium'
@@ -242,7 +246,7 @@ function RequiredPluginContent({
 }
 
 function getRecommendedGroup(dirName: string): keyof typeof RECOMMENDED_GROUP_LABELS {
-  if (['Yunzai-genshin', 'xiaoyao-cvs-plugin', 'liangshi-calc'].includes(dirName)) {
+  if (['genshin', 'Yunzai-genshin', 'xiaoyao-cvs-plugin', 'liangshi-calc'].includes(dirName)) {
     return 'panel';
   }
 
@@ -295,6 +299,7 @@ export default function Plugin() {
   });
   const [loading, setLoading] = useState('');
   const [message, setMessage] = useState('');
+  const [messageKind, setMessageKind] = useState<'success' | 'error'>('success');
   const [customUrl, setCustomUrl] = useState('');
   const [uploadDirName, setUploadDirName] = useState('');
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
@@ -309,7 +314,8 @@ export default function Plugin() {
   const archiveInputRef = useRef<HTMLInputElement>(null);
   const uploadDirInputRef = useRef<HTMLInputElement>(null);
 
-  const showMessage = (msg: string) => {
+  const showMessage = (msg: string, kind: 'success' | 'error' = 'success') => {
+    setMessageKind(kind);
     setMessage(msg);
     setTimeout(() => setMessage(''), 4000);
   };
@@ -342,6 +348,8 @@ export default function Plugin() {
         if (!(d.busy as boolean)) {
           setLoading('');
         }
+      } else if (data.type === 'yunzai.error') {
+        showMessage((data.data as Record<string, string>)?.message ?? '无法连接管理服务', 'error');
       } else if (data.type === 'yunzai.result') {
         showMessage((data.data as Record<string, string>)?.message ?? '操作完成');
       }
@@ -396,7 +404,7 @@ export default function Plugin() {
     try {
       setPluginArchives(await getPluginArchiveEntries());
     } catch (err: any) {
-      showMessage(err?.message ?? '无法读取插件压缩包列表');
+      showMessage(err?.message ?? '无法读取插件压缩包列表', 'error');
     }
   };
 
@@ -439,7 +447,7 @@ export default function Plugin() {
       setUploadDirName('');
       showMessage('插件压缩包已保存，可在列表中点击「解压安装」');
     } catch (err: any) {
-      showMessage(err?.message ?? '压缩包上传失败');
+      showMessage(err?.message ?? '压缩包上传失败', 'error');
     } finally {
       setArchiveLoading('');
       setUploadProgress(null);
@@ -498,7 +506,7 @@ export default function Plugin() {
       showMessage('插件压缩包解压安装完成');
       window.API.postMessage({ type: 'yunzai.status' });
     } catch (err: any) {
-      showMessage(err?.message ?? '插件压缩包解压失败');
+      showMessage(err?.message ?? '插件压缩包解压失败', 'error');
     } finally {
       setArchiveLoading('');
     }
@@ -514,7 +522,7 @@ export default function Plugin() {
       setPluginArchives(await deletePluginArchiveEntry(id));
       showMessage('插件压缩包记录已删除');
     } catch (err: any) {
-      showMessage(err?.message ?? '删除失败');
+      showMessage(err?.message ?? '删除失败', 'error');
     } finally {
       setArchiveLoading('');
     }
@@ -522,7 +530,10 @@ export default function Plugin() {
 
   const isDisabled = !!loading || state.busy || isDesktopRuntime;
   const busyLabel = loading || (state.busy ? '处理中...' : '') || (lastAction ? `${lastAction}中...` : '处理中...');
-  const requiredPlugin = state.variant === 'miao' ? (state.catalog.find(item => item.dirName === 'miao-plugin') ?? null) : null;
+  const genshinInstalled = state.plugins.some(item => item.name === 'genshin' || item.name === 'Yunzai-genshin');
+  const requiredPlugin = state.variant === 'miao' || (state.variant === 'trss' && genshinInstalled)
+    ? (state.catalog.find(item => item.dirName === 'miao-plugin') ?? null)
+    : null;
   const requiredInstalledPlugin = state.plugins.find(item => item.name === 'miao-plugin') ?? null;
 
   // 分组：目录内已安装 / 目录内未安装
@@ -547,7 +558,6 @@ export default function Plugin() {
   const catalogDirNames = new Set(state.catalog.map(c => c.dirName));
   const extraInstalled = state.plugins.filter(p => !catalogDirNames.has(p.name));
   const installedPluginMap = new Map(state.plugins.map(item => [item.name, item]));
-  const installedCount = catalogInstalled.length + extraInstalled.length + Number(requiredPlugin?.installed);
   const recommendedGroups = Object.entries(
     catalogNotInstalled.reduce<Record<string, CatalogItem[]>>((acc, item) => {
       const group = getRecommendedGroup(item.dirName);
@@ -590,7 +600,7 @@ export default function Plugin() {
         </PrimaryDiv>
       )}
       {/* ── 通知 ── */}
-      {message && <NotificationDiv className='rounded-xl px-4 py-3 text-sm animate-fade-in shadow-sm'>{message}</NotificationDiv>}
+      {message && <Feedback kind={messageKind}>{message}</Feedback>}
 
       {/* ── 进行中 ── */}
       {(loading || state.busy) && (
@@ -627,12 +637,6 @@ export default function Plugin() {
       {/* ── 已安装插件 ── */}
       {pluginTab === 'installed' && (Boolean(requiredPlugin) || catalogInstalled.length > 0 || extraInstalled.length > 0) && (
         <SecondaryDiv className='rounded-xl overflow-hidden'>
-          <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>
-            <div className='flex items-center gap-2'>
-              <span className='text-sm font-semibold'>✅ 已安装</span>
-              <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>{installedCount}</TagDiv>
-            </div>
-          </HeaderDiv>
           <Collapse
             items={[
               ...(requiredPlugin
@@ -672,13 +676,18 @@ export default function Plugin() {
                                 >
                                   {PLUGIN_ICONS[p.dirName] ?? '🧩'}
                                 </div>
-                                <div className='flex-1 min-w-0 pr-20'>
+                                <div className='flex-1 min-w-0 sm:pr-20'>
                                   <div className='flex items-center gap-2'>
                                     <span className='text-[13px] font-semibold truncate'>{p.label}</span>
                                     <span className='shrink-0 w-1.5 h-1.5 rounded-full bg-green-500' title='已安装' />
                                   </div>
                                   <div className='text-[11px] opacity-40 mt-0.5 line-clamp-1'>{PLUGIN_DESC[p.dirName] ?? p.aliases.join(' / ')}</div>
-                                  <div className='absolute right-4 top-3 flex items-center gap-1.5'>
+                                  {p.requires?.map(required => (
+                                    <div key={required} className={`text-[11px] mt-1 ${installedPluginMap.has(required) ? 'text-green-500/80' : 'text-amber-500'}`}>
+                                      {installedPluginMap.has(required) ? `依赖已安装：${required}` : `需要先安装：${required}`}
+                                    </div>
+                                  ))}
+                                  <div className='plugin-card-action'>
                                     {canUpdate && (
                                       <Button
                                         className='px-2.5 py-1 text-[11px] rounded-lg font-medium'
@@ -734,13 +743,13 @@ export default function Plugin() {
                               >
                                 🧩
                               </div>
-                              <div className='flex-1 min-w-0 pr-20'>
+                              <div className='flex-1 min-w-0 sm:pr-20'>
                                 <div className='flex items-center gap-2'>
                                   <span className='text-[13px] font-semibold truncate'>{p.name}</span>
                                   <span className='shrink-0 w-1.5 h-1.5 rounded-full bg-green-500' title='已安装' />
                                 </div>
                                 <div className='text-[11px] opacity-40 mt-0.5 line-clamp-1'>第三方插件</div>
-                                <div className='absolute right-4 top-3 flex items-center gap-1.5'>
+                                <div className='plugin-card-action'>
                                   {p.isGit && (
                                     <Button
                                       className='px-2.5 py-1 text-[11px] rounded-lg font-medium'
@@ -794,12 +803,6 @@ export default function Plugin() {
       {/* ── 未安装插件 ── */}
       {pluginTab === 'catalog' && catalogNotInstalled.length > 0 && (
         <SecondaryDiv className='rounded-xl overflow-hidden'>
-          <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>
-            <div className='flex items-center gap-2'>
-              <span className='text-sm font-semibold'>🏪 推荐插件</span>
-              <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>{catalogNotInstalled.length}</TagDiv>
-            </div>
-          </HeaderDiv>
           <Collapse
             items={recommendedGroups.map(([group, items]) => ({
               key: `recommended-${group}`,
@@ -811,12 +814,17 @@ export default function Plugin() {
                       <div className='w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0' style={{ background: 'rgba(128,128,128,.06)' }}>
                         {PLUGIN_ICONS[p.dirName] ?? '🧩'}
                       </div>
-                      <div className='flex-1 min-w-0 pr-20'>
+                      <div className='flex-1 min-w-0 sm:pr-20'>
                         <div className='flex items-center gap-2'>
                           <span className='text-[13px] font-semibold truncate'>{p.label}</span>
                         </div>
                         <div className='text-[11px] opacity-40 mt-0.5 line-clamp-1'>{PLUGIN_DESC[p.dirName] ?? p.aliases.join(' / ')}</div>
-                        <div className='absolute right-4 top-3 flex items-center gap-1.5'>
+                        {p.requires?.map(required => (
+                          <div key={required} className={`text-[11px] mt-1 ${state.plugins.some(item => item.name === required) ? 'text-green-500/80' : 'text-amber-500'}`}>
+                            {state.plugins.some(item => item.name === required) ? `依赖已安装：${required}` : `需要先安装：${required}`}
+                          </div>
+                        ))}
+                        <div className='plugin-card-action'>
                           <Button
                             className='px-3 py-1 text-[11px] rounded-lg font-medium'
                             onClick={() => sendAction('install_plugin', `安装 ${p.label}`, { plugin: p.aliases[0] })}
@@ -847,7 +855,6 @@ export default function Plugin() {
         <SecondaryDiv className='rounded-xl overflow-hidden'>
           <HeaderDiv className='px-4 py-2.5 flex flex-wrap items-center justify-between gap-3'>
             <div className='flex items-center gap-2 min-w-0'>
-              <span className='text-sm font-semibold'>🌐 在线选插件</span>
               <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>{onlineFiltered.length}</TagDiv>
             </div>
             <Input
@@ -875,7 +882,7 @@ export default function Plugin() {
                         <div className='w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0' style={{ background: 'rgba(128,128,128,.06)' }}>
                           {PLUGIN_ICONS[item.dirName] ?? '🌐'}
                         </div>
-                        <div className='flex-1 min-w-0 pr-20'>
+                        <div className='flex-1 min-w-0 sm:pr-20'>
                           <div className='flex items-center gap-2 flex-wrap'>
                             <span className='text-[13px] font-semibold truncate'>{item.label}</span>
                             <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>{item.category}</TagDiv>
@@ -884,7 +891,7 @@ export default function Plugin() {
                           <div className='text-[10px] opacity-30 mt-1'>
                             作者: {item.author || '未知'} · {item.dirName}
                           </div>
-                          <div className='absolute right-4 top-3 flex items-center gap-1.5'>
+                          <div className='plugin-card-action'>
                             <Button
                               className='px-3 py-1 text-[11px] rounded-lg font-medium'
                               onClick={() => sendAction('install_plugin', `安装 ${item.label}`, { plugin: item.repoUrl })}
@@ -909,9 +916,6 @@ export default function Plugin() {
       {pluginTab === 'custom' && (
         <div className='space-y-3'>
           <SecondaryDiv className='rounded-xl overflow-hidden'>
-            <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>
-              <span className='text-sm font-semibold'>🔗 通过 URL 安装</span>
-            </HeaderDiv>
             <PrimaryDiv className='px-4 py-3'>
               <div className='text-[11px] opacity-40 mb-2'>输入 Git 仓库地址安装第三方插件</div>
               <div className='flex gap-2'>
@@ -931,12 +935,6 @@ export default function Plugin() {
           </SecondaryDiv>
 
           <SecondaryDiv className='rounded-xl overflow-hidden'>
-            <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>
-              <div className='flex items-center gap-2'>
-                <span className='text-sm font-semibold'>📦 插件压缩包</span>
-                <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>{pluginArchives.length}</TagDiv>
-              </div>
-            </HeaderDiv>
             <PrimaryDiv className='px-4 py-3 space-y-3'>
               <div className='text-[11px] opacity-45'>
                 上传 ZIP 保存到压缩包列表，再点击「解压安装」写入 plugins/；支持反复解压覆盖已有文件。解压时需先停止 Yunzai。

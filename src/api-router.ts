@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { PACKAGE_ROOT } from './path';
 import {
   backupYunzaiData,
+  deleteLogFile,
   deletePluginArchive,
   extractPluginArchive,
   getDataBackupList,
@@ -213,6 +214,19 @@ apiRouter.get('/yunzai/logs', ctx => {
     message: 'ok',
     data: getLogViewerData(file, lines)
   };
+});
+
+apiRouter.post('/yunzai/logs/delete', ctx => {
+  try {
+    const file = (ctx.request as { body?: Record<string, unknown> }).body?.file;
+    const data = deleteLogFile(typeof file === 'string' ? file : '');
+
+    ctx.status = 200;
+    ctx.body = { code: 200, message: '日志已删除', data };
+  } catch (err: any) {
+    ctx.status = 400;
+    ctx.body = { code: 400, message: err?.message ?? '日志删除失败', data: null };
+  }
 });
 
 apiRouter.post('/yunzai/action', async ctx => {

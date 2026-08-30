@@ -491,6 +491,8 @@ class YunzaiManager {
 
     this.ready = false;
 
+    this.normalizeKnownPluginDirectories();
+
     // ── 仅 Miao-Yunzai 检查其发行版专属依赖 ──
     this.validateRequiredPlugins();
 
@@ -591,6 +593,20 @@ class YunzaiManager {
       this.worker!.on('message', handler);
       this.worker!.once('exit', exitHandler);
     });
+  }
+
+  /** 兼容旧版本把 Yunzai-genshin 安装到错误目录名的情况。 */
+  private normalizeKnownPluginDirectories(): void {
+    const pluginsDir = join(getYunzaiDir(), 'plugins');
+    const legacyDir = join(pluginsDir, 'Yunzai-genshin');
+    const canonicalDir = join(pluginsDir, 'genshin');
+
+    if (!existsSync(legacyDir) || existsSync(canonicalDir)) {
+      return;
+    }
+
+    renameSync(legacyDir, canonicalDir);
+    logger.info('[Yunzai] 已将 Yunzai-genshin 目录修正为 genshin');
   }
 
   private async stopInternal(): Promise<void> {
@@ -888,7 +904,14 @@ class YunzaiManager {
     if (!this.isInstalled) {
       throw new Error('Yunzai 未安装');
     }
-    const pluginDir = `${getYunzaiDir()}/plugins/${plugin.dirName}`;
+    this.normalizeKnownPluginDirectories();
+    const dirName = plugin.dirName.trim();
+
+    if (!dirName || dirName === '.' || dirName === '..' || /[\\/:"*?<>|]/.test(dirName)) {
+      throw new Error(`插件目录名无效：${plugin.dirName}`);
+    }
+
+    const pluginDir = join(getYunzaiDir(), 'plugins', dirName);
 
     if (existsSync(pluginDir)) {
       throw new Error(`${plugin.label} 已安装`);
@@ -1091,6 +1114,7 @@ class YunzaiManager {
     if (!this.isInstalled) {
       throw new Error('Yunzai 未安装');
     }
+    this.normalizeKnownPluginDirectories();
     const pluginDir = `${getYunzaiDir()}/plugins/${plugin.dirName}`;
 
     if (!existsSync(pluginDir)) {
@@ -1126,6 +1150,7 @@ class YunzaiManager {
     if (!this.isInstalled) {
       throw new Error('Yunzai 未安装');
     }
+    this.normalizeKnownPluginDirectories();
     const pluginDir = `${getYunzaiDir()}/plugins/${plugin.dirName}`;
 
     if (!existsSync(pluginDir)) {
@@ -1160,6 +1185,76 @@ class YunzaiManager {
     } finally {
       this.endTask();
     }
+  }
+
+  /** 安装单个 npm 包，供管理面板的依赖工具使用。 */
+  async installDependency(packageName: string, version: string, dependencyType: 'dependencies' | 'devDependencies'): Promise<string> {
+    if (!this.isInstalled) {
+      throw new Error('Yunzai 未安装');
+    }
+
+    const name = packageName.trim();
+    const requestedVersion = version.trim();
+
+    if (!/^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+$/i.test(name)) {
+      throw new Error('包名格式不正确');
+    }
+    if (requestedVersion && !/^[a-z0-9._~+^<>=*| -]+$/i.test(requestedVersion)) {
+      throw new Error('版本格式不正确');
+    }
+
+    const spec = requestedVersion ? `${name}@${requestedVersion}` : name;
+
+    this.beginTask(`安装 ${spec}`);
+    try {
+      this.throwIfCancelled();
+      logger.info(`[Yunzai] 正在安装 ${spec}...`);
+      const isTrss = detectYunzaiVariant(readYunzaiPackage(getYunzaiDir())) === 'trss';
+      const devFlag = dependencyType === 'devDependencies' ? '--dev' : '';
+      const output = await this.execPackageAdd(getYunzaiDir(), spec, devFlag, isTrss);
+
+      this.throwIfCancelled();
+      logger.info(`[Yunzai] ${spec} 安装完成`);
+
+      return output;
+    } finally {
+      this.endTask();
+    }
+  }
+
+  private execPackageAdd(cwd: string, spec: string, devFlag: string, isTrss: boolean): Promise<string> {
+    const run = (command: string, args: string[], retried = false): Promise<string> => new Promise((resolve, reject) => {
+        try {
+          const cp = execFile(command, args, { cwd, timeout: 1_800_000 }, (err, stdout, stderr) => {
+            this.taskProcess = null;
+            if (err) {
+              if (isTrss && (err as any).code === 'ENOENT' && !retried) {
+                void this.bootstrapManagedPnpm()
+                  .then(pnpm => run(pnpm, ['add', spec, devFlag].filter(Boolean), true))
+                  .then(resolve)
+                  .catch(reject);
+
+                return;
+              }
+              const detail = stderr?.trim() ? `${stderr.trim()}\n${err.message}` : err.message;
+
+              reject(new Error(detail));
+
+              return;
+            }
+            resolve(stdout);
+          });
+
+          this.taskProcess = cp;
+        } catch (err) {
+          this.taskProcess = null;
+          reject(err);
+        }
+      });
+
+    return isTrss
+      ? run(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['add', spec, devFlag].filter(Boolean))
+      : run(process.execPath, [YARN_PATH, 'add', spec, devFlag].filter(Boolean));
   }
 
   /** 安装 Puppeteer 所需的 Chrome 浏览器 */
@@ -1241,10 +1336,10 @@ class YunzaiManager {
 
     const workspaces = Array.isArray(pkg.workspaces) ? [...pkg.workspaces] : [];
 
-    if (!workspaces.includes('plugins/*')) {
-      pkg.workspaces = [...workspaces, 'plugins/*'];
+    if (!workspaces.includes('plugins/**')) {
+      pkg.workspaces = [...workspaces, 'plugins/**'];
       modified = true;
-      logger.info('[Yunzai] 依赖安装前临时补充 workspaces: ["plugins/*"]');
+      logger.info('[Yunzai] 依赖安装前临时补充 workspaces: ["plugins/**"]');
     }
 
     if (typeof pkg.name !== 'string' || !pkg.name.startsWith('@')) {

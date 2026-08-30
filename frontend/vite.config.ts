@@ -50,7 +50,13 @@ export default defineConfig({
       output: {
         dir: '../dist',
         entryFileNames: 'assets/index.js',
-        assetFileNames: 'assets/[name].[ext]'
+        assetFileNames: 'assets/[name].[ext]',
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('/@alemonjs/react-ui/')) return 'ui';
+          if (id.includes('/echarts') || id.includes('/zrender/')) return 'charts';
+          if (id.includes('/@uiw/react-markdown-preview/') || id.includes('/rehype-')) return 'markdown';
+        }
       }
     }
   }

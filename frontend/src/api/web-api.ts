@@ -43,7 +43,16 @@ async function callApi(path: string, method: 'GET' | 'POST', data?: unknown) {
 
     return response.data;
   } catch (error: any) {
-    throw new Error(error?.response?.data?.message ?? error?.message ?? '请求失败');
+    const status = error?.response?.status;
+    const serverMessage = error?.response?.data?.message;
+
+    if (serverMessage && status !== 500) {
+      throw new Error(serverMessage);
+    }
+    if (!error?.response) {
+      throw new Error('无法连接管理服务，请确认后端已启动');
+    }
+    throw new Error(status === 500 ? '管理服务暂时不可用，请稍后重试' : '请求失败，请稍后重试');
   }
 }
 
@@ -255,7 +264,7 @@ export function createWebAPI(): API {
 
       emit({ type: 'yunzai.status', data: json.data });
     } catch (err: any) {
-      emit({ type: 'yunzai.result', data: { message: err?.message ?? '请求失败' } });
+      emit({ type: 'yunzai.error', data: { message: err?.message ?? '无法连接管理服务' } });
     } finally {
       statusRequestInflight = false;
 
@@ -360,6 +369,12 @@ export function createWebAPI(): API {
               const json = await callApi(`/yunzai/logs${query ? `?${query}` : ''}`, 'GET');
 
               emit({ type: 'yunzai.logs', data: json.data });
+              break;
+            }
+            case 'yunzai.logs.delete': {
+              const json = await callApi('/yunzai/logs/delete', 'POST', data.data ?? {});
+
+              emit({ type: 'yunzai.logs.deleted', data: json.data });
               break;
             }
             case 'yunzai.action': {

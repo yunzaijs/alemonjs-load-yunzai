@@ -1,12 +1,14 @@
 import { HeaderDiv, SecondaryDiv, SidebarDiv } from '@alemonjs/react-ui';
-import React, { useEffect, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import Data from './Data';
-import From from './From';
-import Logs from './Logs';
-import Manage from './Manage';
-import Plugin from './Plugin';
-import Repo from './Repo';
+
+const Data = lazy(() => import('./Data'));
+const From = lazy(() => import('./From'));
+const Logs = lazy(() => import('./Logs'));
+const Manage = lazy(() => import('./Manage'));
+const Plugin = lazy(() => import('./Plugin'));
+const Repo = lazy(() => import('./Repo'));
+const Dependency = lazy(() => import('./Dependency'));
 
 const APP_VERSION = __APP_VERSION__;
 const THEME_STORAGE_KEY = 'alemonjs-load-yunzai:brand-theme';
@@ -75,9 +77,10 @@ export default function AppLayout() {
   const activeKey =
     configMatch?.[1] ??
     repoMatch?.[1] ??
-    (location.pathname === '/plugin' ? 'plugin' : location.pathname === '/logs' ? 'logs' : location.pathname === '/data' ? 'data' : 'manage');
+    (location.pathname === '/plugin' ? 'plugin' : location.pathname === '/logs' ? 'logs' : location.pathname === '/data' ? 'data' : location.pathname === '/dependency' ? 'dependency' : 'manage');
   const isConfig = CONFIG_KEYS.has(activeKey);
   const isRepo = REPO_PAGE_KEYS.has(activeKey);
+  const isLogs = activeKey === 'logs';
   const go = (path: string) => {
     void navigate(path);
   };
@@ -92,7 +95,7 @@ export default function AppLayout() {
   };
 
   return (
-    <SecondaryDiv className='min-h-screen lg:h-screen lg:flex lg:overflow-hidden'>
+    <SecondaryDiv className={`${isLogs ? 'h-screen overflow-hidden' : 'min-h-screen'} lg:h-screen lg:flex lg:overflow-hidden`}>
       {/* ── PC 侧边栏 ── */}
       <SidebarDiv className='hidden lg:flex lg:flex-col w-44 shrink-0 px-2 py-3 overflow-y-auto' style={{ borderRight: '1px solid rgba(128,128,128,.08)' }}>
         <div className='flex items-center gap-2 px-3 py-2 mb-3'>
@@ -138,6 +141,11 @@ export default function AppLayout() {
             label: '💾 数据',
             activeKey: 'data',
             path: '/data'
+          },
+          {
+            label: '🧩 依赖',
+            activeKey: 'dependency',
+            path: '/dependency'
           }
         ].map(item => {
           return (
@@ -147,14 +155,14 @@ export default function AppLayout() {
           );
         })}
 
-        <div className='text-[10px] uppercase tracking-wider opacity-25 font-medium px-3 pt-4 pb-1'>仓库配置</div>
+        <div className='text-[10px] uppercase tracking-wider opacity-45 font-medium px-3 pt-4 pb-1'>设置 · 来源</div>
         {REPO_SECTIONS.map(s => (
           <NavItem key={s.key} active={activeKey === s.key} onClick={() => go(`/repo/${s.key}`)}>
             {s.label}
           </NavItem>
         ))}
 
-        <div className='text-[10px] uppercase tracking-wider opacity-25 font-medium px-3 pt-4 pb-1'>Yunzai 配置</div>
+        <div className='text-[10px] uppercase tracking-wider opacity-45 font-medium px-3 pt-4 pb-1'>设置 · 机器人</div>
         {CONFIG_SECTIONS.map(s => (
           <NavItem key={s.key} active={activeKey === s.key} onClick={() => go(`/config/${s.key}`)}>
             {s.label}
@@ -163,7 +171,7 @@ export default function AppLayout() {
       </SidebarDiv>
 
       {/* ── 主内容区 ── */}
-      <div className='flex-1 flex flex-col min-w-0 lg:overflow-y-auto'>
+      <div className={`flex-1 flex flex-col min-w-0 ${isLogs ? 'overflow-hidden' : 'lg:overflow-y-auto'}`}>
         {/* ── 移动端导航 ── */}
         <div className='lg:hidden'>
           <HeaderDiv className='px-3 py-2.5 flex items-center gap-2.5'>
@@ -203,6 +211,9 @@ export default function AppLayout() {
             <Pill active={activeKey === 'data'} onClick={() => go('/data')}>
               数据
             </Pill>
+            <Pill active={activeKey === 'dependency'} onClick={() => go('/dependency')}>
+              依赖
+            </Pill>
             <Pill
               active={isConfig}
               onClick={() => {
@@ -235,13 +246,16 @@ export default function AppLayout() {
         </div>
 
         {/* ── 内容 ── */}
-        <div className='flex-1 px-3 py-2 sm:px-4 lg:px-6 lg:py-4'>
-          {activeKey === 'manage' && <Manage />}
-          {activeKey === 'plugin' && <Plugin />}
-          {activeKey === 'logs' && <Logs />}
-          {activeKey === 'data' && <Data />}
-          {isConfig && <From section={activeKey} />}
-          {isRepo && <Repo section={activeKey} />}
+        <div className={`flex-1 px-3 py-2 sm:px-4 lg:px-6 lg:py-4 ${isLogs ? 'min-h-0 flex flex-col overflow-hidden' : ''}`}>
+          <Suspense fallback={<div className='rounded-xl px-4 py-8 text-center text-sm opacity-50'>页面加载中...</div>}>
+            {activeKey === 'manage' && <Manage />}
+            {activeKey === 'plugin' && <Plugin />}
+            {activeKey === 'logs' && <Logs />}
+            {activeKey === 'data' && <Data />}
+            {activeKey === 'dependency' && <Dependency />}
+            {isConfig && <From section={activeKey} />}
+            {isRepo && <Repo section={activeKey} />}
+          </Suspense>
         </div>
       </div>
     </SecondaryDiv>

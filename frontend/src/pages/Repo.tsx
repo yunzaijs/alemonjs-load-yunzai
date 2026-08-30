@@ -8,6 +8,7 @@ import {
   type RepositoryArchiveTarget,
   uploadRepositoryArchive
 } from '../api/web-api';
+import { Feedback } from '../components/Ui';
 
 interface PluginEntry {
   key: string;
@@ -72,14 +73,14 @@ function Row({ label, tip, children }: { label: string; tip?: string; children: 
   );
 }
 
-function SaveBtn({ saved }: { saved: boolean }) {
+function SaveBtn({ saved, saving }: { saved: boolean; saving: boolean }) {
   return (
     <Button
       type='submit'
       className={`px-3 py-1 rounded-lg text-[11px] font-semibold ${saved ? 'opacity-70' : ''}`}
       style={!saved ? { background: 'linear-gradient(135deg, #d5c8b2 0%, #8f8c76 100%)' } : undefined}
     >
-      {saved ? '✓ 已保存' : '💾 保存'}
+      {saving ? '保存中...' : saved ? '✓ 已保存' : '💾 保存'}
     </Button>
   );
 }
@@ -102,7 +103,9 @@ export default function Repo({ section }: { section: string }) {
   const [formData, setFormData] = useState<RepoData>({ ...INITIAL });
   const [plugins, setPlugins] = useState<PluginEntry[]>([]);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [messageKind, setMessageKind] = useState<'success' | 'error'>('success');
   const [repoTab, setRepoTab] = useState<RepositoryArchiveTarget>('yunzai');
   const [archiveStatuses, setArchiveStatuses] = useState<RepositoryArchiveStatus[]>([]);
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
@@ -133,7 +136,7 @@ export default function Repo({ section }: { section: string }) {
         const list: PluginEntry[] = [];
 
         for (const [key, val] of Object.entries(raw as Record<string, any>)) {
-          if (val && typeof val === 'object' && val.dirName) {
+          if (val && typeof val === 'object' && val.repoUrl) {
             list.push({
               key,
               dirName: val.dirName ?? '',
@@ -146,6 +149,9 @@ export default function Repo({ section }: { section: string }) {
         setPlugins(list);
       } else if (data.type === 'repo.result') {
         setMessage((data.data as { message?: string })?.message ?? '保存完成');
+        setSaving(false);
+        setSaved(true);
+        window.setTimeout(() => setSaved(false), 2000);
       }
     };
 
@@ -166,6 +172,7 @@ export default function Repo({ section }: { section: string }) {
     try {
       setArchiveStatuses(await getRepositoryArchiveStatuses());
     } catch (err: any) {
+      setMessageKind('error');
       setMessage(err?.message ?? '无法读取压缩包状态');
     }
   };
@@ -205,13 +212,18 @@ export default function Repo({ section }: { section: string }) {
     for (const p of plugins) {
       const k = p.key.trim();
 
-      if (!k || !p.dirName.trim()) {
+      const repoUrl = p.repoUrl.trim();
+
+      if (!k || !repoUrl) {
         continue;
       }
+      const dirName = p.dirName.trim();
+      const label = p.label.trim();
+
       pluginsObj[k] = {
-        dirName: p.dirName.trim(),
-        repoUrl: p.repoUrl.trim(),
-        label: p.label.trim() || p.dirName.trim(),
+        ...(dirName ? { dirName } : {}),
+        repoUrl,
+        ...(label ? { label } : {}),
         aliases: p.aliases
           .split(',')
           .map(s => s.trim())
@@ -220,8 +232,8 @@ export default function Repo({ section }: { section: string }) {
     }
 
     window.API.postMessage({ type: 'repo.save', data: { ...formData, plugins: pluginsObj } });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setSaved(false);
+    setSaving(true);
   };
 
   const currentArchiveStatus = archiveStatuses.find(item => item.target === repoTab) ?? {
@@ -254,6 +266,7 @@ export default function Repo({ section }: { section: string }) {
       setMessage(`${ARCHIVE_TARGETS[repoTab].label} 压缩包已保存，旧压缩包已覆盖`);
       await refreshArchiveStatuses();
     } catch (err: any) {
+      setMessageKind('error');
       setMessage(err?.message ?? '压缩包上传失败');
     } finally {
       setArchiveLoading('');
@@ -270,11 +283,13 @@ export default function Repo({ section }: { section: string }) {
       return;
     }
     if (!/\.zip$/i.test(file.name)) {
+      setMessageKind('error');
       setMessage('仅支持上传 .zip 压缩包');
 
       return;
     }
     if (file.size > MAX_REPOSITORY_ARCHIVE_SIZE_MB * 1024 * 1024) {
+      setMessageKind('error');
       setMessage(`压缩包过大，当前最大支持 ${MAX_REPOSITORY_ARCHIVE_SIZE_MB}MB`);
 
       return;
@@ -295,6 +310,7 @@ export default function Repo({ section }: { section: string }) {
       setMessage(`${ARCHIVE_TARGETS[repoTab].label} 压缩包解压完成`);
       await refreshArchiveStatuses();
     } catch (err: any) {
+      setMessageKind('error');
       setMessage(err?.message ?? '压缩包解压失败');
     } finally {
       setArchiveLoading('');
@@ -305,6 +321,7 @@ export default function Repo({ section }: { section: string }) {
     const repoUrl = (repoTab === 'yunzai' ? formData.yunzai_repo : formData.miao_plugin_repo).trim();
 
     if (!repoUrl) {
+      setMessageKind('error');
       setMessage('请先填写 Git 仓库地址');
 
       return;
@@ -315,6 +332,7 @@ export default function Repo({ section }: { section: string }) {
       await repairRepositoryArchiveOrigin(repoTab, repoUrl);
       setMessage(`${ARCHIVE_TARGETS[repoTab].label} 仓库来源已修复，不会覆盖当前解压文件`);
     } catch (err: any) {
+      setMessageKind('error');
       setMessage(err?.message ?? '仓库来源修复失败');
     } finally {
       setArchiveLoading('');
@@ -333,7 +351,7 @@ export default function Repo({ section }: { section: string }) {
 
   return (
     <form onSubmit={handleSubmit} className='py-2 space-y-3'>
-      {message && <PrimaryDiv className='rounded-xl px-4 py-3 text-sm animate-fade-in shadow-sm'>{message}</PrimaryDiv>}
+      {message && <Feedback kind={messageKind}>{message}</Feedback>}
       {section === 'auth' && (
         <SecondaryDiv className='rounded-xl overflow-hidden'>
           <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>
@@ -341,7 +359,7 @@ export default function Repo({ section }: { section: string }) {
               <span className='text-sm font-semibold'>🔑 主人认证</span>
               <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>AlemonJS</TagDiv>
             </div>
-            <SaveBtn saved={saved} />
+            <SaveBtn saved={saved} saving={saving} />
           </HeaderDiv>
           <PrimaryDiv className='px-4 py-0.5 divide-y divide-gray-200/10'>
             <Row label='主人 ID' tip='AlemonJS 主人 ID，逗号分隔多个'>
@@ -373,7 +391,7 @@ export default function Repo({ section }: { section: string }) {
               <span className='text-sm font-semibold'>📦 仓库</span>
               <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>Git + ZIP</TagDiv>
             </div>
-            <SaveBtn saved={saved} />
+            <SaveBtn saved={saved} saving={saving} />
           </HeaderDiv>
           <PrimaryDiv className='px-4 py-3 space-y-3'>
             <div className='flex items-center gap-2'>
@@ -528,7 +546,7 @@ export default function Repo({ section }: { section: string }) {
         <SecondaryDiv className='rounded-xl overflow-hidden'>
           <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>
             <span className='text-sm font-semibold'>🌐 网络配置</span>
-            <SaveBtn saved={saved} />
+            <SaveBtn saved={saved} saving={saving} />
           </HeaderDiv>
           <PrimaryDiv className='px-4 py-0.5 divide-y divide-gray-200/10'>
             <Row label='GitHub 代理' tip='国内加速代理前缀，GitHub 仓库克隆与在线插件索引下载都会拼接此前缀'>
@@ -582,7 +600,7 @@ export default function Repo({ section }: { section: string }) {
               >
                 + 添加
               </Button>
-              <SaveBtn saved={saved} />
+              <SaveBtn saved={saved} saving={saving} />
             </div>
           </HeaderDiv>
           {plugins.length === 0 ? (
@@ -620,10 +638,10 @@ export default function Repo({ section }: { section: string }) {
                       />
                     </div>
                     <div>
-                      <div className='text-[10px] opacity-40 mb-1'>目录名 *</div>
+                      <div className='text-[10px] opacity-40 mb-1'>目录名（可选）</div>
                       <Input
                         value={p.dirName}
-                        placeholder='my-plugin'
+                        placeholder='自动使用仓库名'
                         onChange={e => {
                           const list = [...plugins];
 

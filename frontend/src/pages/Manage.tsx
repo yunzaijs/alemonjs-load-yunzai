@@ -1,5 +1,6 @@
-import { Button, Modal, NotificationDiv, PrimaryDiv, TagDiv, Tooltip } from '@alemonjs/react-ui';
+import { Button, PrimaryDiv, TagDiv, Tooltip } from '@alemonjs/react-ui';
 import { useEffect, useState } from 'react';
+import { ConfirmDialog, Feedback } from '../components/Ui';
 
 type ColorKey = 'green' | 'blue' | 'orange' | 'red';
 
@@ -101,6 +102,7 @@ export default function Manage() {
   const [helpData, setHelpData] = useState<HelpData | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ action: string; label: string; extra?: Record<string, string> } | null>(null);
   const [lastAction, setLastAction] = useState('');
+  const [connectionError, setConnectionError] = useState('');
 
   const showMessage = (msg: string) => {
     setMessage(msg);
@@ -120,9 +122,13 @@ export default function Manage() {
         if (d.help) {
           setHelpData(d.help);
         }
+        setConnectionError('');
         if (!d.busy) {
           setLoading('');
         }
+      } else if (data.type === 'yunzai.error') {
+        setConnectionError((data.data as Record<string, string>)?.message ?? '无法连接管理服务');
+        setLoading('');
       } else if (data.type === 'yunzai.result') {
         showMessage((data.data as Record<string, string>)?.message ?? '操作完成');
       }
@@ -160,6 +166,7 @@ export default function Manage() {
   };
 
   const statusTagLabel = getStatusTagLabel(state);
+  const displayStatusTagLabel = connectionError ? '未连接' : statusTagLabel;
   const canInstall = !state.installed && !state.busy && !loading && !isDesktopRuntime;
   const canStart = state.installed && !state.running && !state.busy && !loading && !isDesktopRuntime;
   const canStop = state.installed && state.running && !state.busy && !loading && !isDesktopRuntime;
@@ -195,13 +202,10 @@ export default function Manage() {
 
   return (
     <div className='py-2 space-y-3'>
-      {isDesktopRuntime && (
-        <PrimaryDiv className='rounded-xl px-4 py-3 text-[12px]' style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.16)' }}>
-          当前 desktop 链路仅同步机器人状态，不提供 Yunzai 启动、停止、重启或维护操作。
-        </PrimaryDiv>
-      )}
+      {isDesktopRuntime && <Feedback kind='warning'>当前为桌面模式，只能查看机器人状态。</Feedback>}
       {/* ── 通知 ── */}
-      {message && <NotificationDiv className='rounded-xl px-4 py-3 text-sm animate-fade-in shadow-sm'>{message}</NotificationDiv>}
+      {connectionError && <Feedback kind='error'>{connectionError}。请确认后端已启动后重试。</Feedback>}
+      {message && <Feedback kind='success'>{message}</Feedback>}
 
       {/* ── 进行中 ── */}
       {(loading || state.busy) && (
@@ -240,10 +244,10 @@ export default function Manage() {
               </div>
               <div>
                 <div className='text-sm font-semibold tracking-tight'>Yunzai</div>
-                <div className='text-[11px] opacity-40 mt-0.5'>{state.status}</div>
+                <div className='text-[11px] opacity-40 mt-0.5'>{connectionError ? '请确认后端已启动' : state.status}</div>
               </div>
             </div>
-            <TagDiv className='px-3 py-1 rounded-full text-xs font-medium'>{statusTagLabel}</TagDiv>
+            <TagDiv className='px-3 py-1 rounded-full text-xs font-medium'>{displayStatusTagLabel}</TagDiv>
           </div>
 
           {showCardActions && (
@@ -288,7 +292,7 @@ export default function Manage() {
                     reason={!canInstallDeps ? getDisabledReason('install_deps') : undefined}
                     onClick={() => sendAction('install_deps', '安装依赖')}
                   >
-                    重装依赖
+                    安装/修复依赖
                   </ActionButton>
                 </>
               ) : (
@@ -317,7 +321,7 @@ export default function Manage() {
       </div>
 
       {/* ── 操作区 ── */}
-      {!state.installed && !isDesktopRuntime && (
+      {!state.installed && !isDesktopRuntime && !connectionError && (
         <div className='flex justify-end'>
           <ActionButton
             className='px-4 py-2 rounded-xl text-sm font-semibold shadow-sm'
@@ -332,7 +336,7 @@ export default function Manage() {
       )}
 
       {/* ── 帮助 ── */}
-      {helpData && (
+      {helpData && !connectionError && (
         <PrimaryDiv className='rounded-b-xl px-4 py-3 space-y-3'>
           {/* 安装流程 */}
           <div>
@@ -374,20 +378,14 @@ export default function Manage() {
       )}
 
       {/* ── 确认弹窗 ── */}
-      <Modal isOpen={!!confirmAction} onClose={() => setConfirmAction(null)}>
-        <div className='p-6 space-y-5'>
-          <div className='text-base font-semibold'>⚠️ 确认操作</div>
-          <div className='text-sm opacity-60 leading-relaxed'>确定要{confirmAction?.label}吗？此操作不可撤销。</div>
-          <div className='flex gap-2.5 justify-end'>
-            <Button className='px-5 py-2 rounded-xl text-sm font-medium' onClick={() => setConfirmAction(null)}>
-              取消
-            </Button>
-            <Button className='px-5 py-2 rounded-xl text-sm font-medium bg-red-500/20 hover:bg-red-500/30' onClick={confirmDanger}>
-              确认
-            </Button>
-          </div>
-        </div>
-      </Modal>
+      <ConfirmDialog
+        open={!!confirmAction}
+        title={`确认${confirmAction?.label ?? '操作'}`}
+        description={`将对 Yunzai 执行“${confirmAction?.label ?? '此操作'}”。请确认当前没有正在进行的重要任务。`}
+        confirmLabel='确认执行'
+        onClose={() => setConfirmAction(null)}
+        onConfirm={confirmDanger}
+      />
     </div>
   );
 }

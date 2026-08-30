@@ -23,6 +23,10 @@ export default createHashRouter([
     element: <AppLayout />
   },
   {
+    path: '/dependency',
+    element: <AppLayout />
+  },
+  {
     path: '/repo/:section',
     element: <AppLayout />
   },

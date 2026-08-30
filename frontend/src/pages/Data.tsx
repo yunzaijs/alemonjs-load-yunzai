@@ -1,6 +1,7 @@
 import { Button, HeaderDiv, PrimaryDiv, SecondaryDiv, TagDiv } from '@alemonjs/react-ui';
-import React, { useEffect, useRef, useState } from 'react';
-import { createDataBackup, getDataBackups, restoreDataBackup, type DataBackupItem, uploadDataBackup } from '../api/web-api';
+import { useEffect, useRef, useState } from 'react';
+import { createDataBackup, getDataBackups, restoreDataBackup, uploadDataBackup, type DataBackupItem } from '../api/web-api';
+import { ConfirmDialog, Feedback } from '../components/Ui';
 
 const MAX_BACKUP_SIZE_MB = 2048;
 
@@ -20,10 +21,12 @@ export default function Data() {
   const isDesktopRuntime = window.__ALEMONJS_RUNTIME_MODE__ === 'desktop';
   const [backups, setBackups] = useState<DataBackupItem[]>([]);
   const [message, setMessage] = useState('');
+  const [messageKind, setMessageKind] = useState<'success' | 'error'>('success');
   const [loading, setLoading] = useState<'backup' | 'restore' | 'upload' | ''>('');
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState<DataBackupItem | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const refresh = async () => {
@@ -34,6 +37,7 @@ export default function Data() {
     try {
       setBackups(await getDataBackups());
     } catch (err: any) {
+      setMessageKind('error');
       setMessage(err?.message ?? '无法读取数据备份列表');
     }
   };
@@ -62,29 +66,37 @@ export default function Data() {
     setLoading('backup');
     try {
       await createDataBackup();
+      setMessageKind('success');
       setMessage('数据备份已创建');
       await refresh();
     } catch (err: any) {
+      setMessageKind('error');
       setMessage(err?.message ?? '数据备份失败');
     } finally {
       setLoading('');
     }
   };
 
-  const handleRestore = async (backup: DataBackupItem) => {
+  const handleRestore = (backup: DataBackupItem) => {
     if (loading) {
       return;
     }
 
-    if (!window.confirm(`恢复“${backup.name}”会覆盖当前 Yunzai/data 数据。请确认机器人已停止，是否继续？`)) {
-      return;
-    }
+    setRestoreTarget(backup);
+  };
 
+  const confirmRestore = async () => {
+    const backup = restoreTarget;
+
+    if (!backup) { return; }
+    setRestoreTarget(null);
     setLoading('restore');
     try {
       await restoreDataBackup(backup.id);
+      setMessageKind('success');
       setMessage(`已恢复备份：${backup.name}`);
     } catch (err: any) {
+      setMessageKind('error');
       setMessage(err?.message ?? '恢复数据备份失败');
     } finally {
       setLoading('');
@@ -101,9 +113,11 @@ export default function Data() {
     setUploadProgress(0);
     try {
       await uploadDataBackup(file, setUploadProgress);
+      setMessageKind('success');
       setMessage(`已上传数据备份：${file.name}`);
       await refresh();
     } catch (err: any) {
+      setMessageKind('error');
       setMessage(err?.message ?? '数据备份上传失败');
     } finally {
       setLoading('');
@@ -145,7 +159,7 @@ export default function Data() {
 
   return (
     <div className='py-2 space-y-3'>
-      {message && <PrimaryDiv className='rounded-xl px-4 py-3 text-sm animate-fade-in shadow-sm'>{message}</PrimaryDiv>}
+      {message && <Feedback kind={messageKind}>{message}</Feedback>}
 
       <SecondaryDiv className='rounded-xl overflow-hidden'>
         <HeaderDiv className='px-4 py-2.5 flex flex-wrap items-center justify-between gap-2'>
@@ -163,7 +177,7 @@ export default function Data() {
           </div>
         </HeaderDiv>
         <PrimaryDiv className='px-4 py-3 space-y-3'>
-          <div className='text-[11px] opacity-50'>恢复会解压并完整覆盖当前 data 目录；为避免写入冲突，恢复前必须先停止机器人。</div>
+          <div className='text-[11px] opacity-55'>恢复会覆盖当前数据，请先停止机器人。</div>
 
           <input
             ref={inputRef}
@@ -247,6 +261,14 @@ export default function Data() {
           </PrimaryDiv>
         )}
       </SecondaryDiv>
+      <ConfirmDialog
+        open={!!restoreTarget}
+        title='确认恢复数据'
+        description={`“${restoreTarget?.name ?? ''}”会覆盖当前 Yunzai/data。请确认机器人已停止。`}
+        confirmLabel='恢复数据'
+        onClose={() => setRestoreTarget(null)}
+        onConfirm={() => void confirmRestore()}
+      />
     </div>
   );
 }

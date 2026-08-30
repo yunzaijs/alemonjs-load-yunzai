@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { getLogViewerData, getStatusData } from './panel-service';
+import { deleteLogFile, getLogViewerData, getStatusData } from './panel-service';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -100,6 +100,11 @@ export const activate = context => {
           type: 'yunzai.logs',
           data: getLogViewerData(typeof data.data?.file === 'string' ? data.data.file : undefined, typeof data.data?.lines === 'number' ? data.data.lines : 400)
         });
+      } else if (data.type === 'yunzai.logs.delete') {
+        webView.postMessage({
+          type: 'yunzai.logs.deleted',
+          data: deleteLogFile(typeof data.data?.file === 'string' ? data.data.file : '')
+        });
       } else if (data.type === 'yunzai.action' || data.type === 'yunzai.init' || data.type === 'yunzai.form.save') {
         postBoundaryMessage('yunzai.result', '当前 desktop 链路仅支持机器人状态同步，不提供 Yunzai 控制或配置写入');
       } else if (data.type === 'repo.init' || data.type === 'repo.save') {
@@ -107,6 +112,9 @@ export const activate = context => {
       }
     } catch (e) {
       console.error(e);
+      if (data.type === 'yunzai.logs.delete') {
+        webView.postMessage({ type: 'yunzai.result', data: { message: e instanceof Error ? e.message : '日志删除失败' } });
+      }
     }
   });
 };

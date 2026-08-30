@@ -1,9 +1,10 @@
 import { getConfig, getConfigValue } from 'alemonjs';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import YAML from 'yaml';
 import { getGhProxy, getYunzaiDir } from './path';
 import { executeYunzaiActionLocal, getStatusSnapshotLocal, installPluginArchiveLocal } from './yunzai/control';
+import { createDataBackup, getDataBackups, restoreDataBackup, saveUploadedDataBackup } from './yunzai/data-backup';
 import { deletePluginArchiveEntry, extractPluginArchiveEntry, getPluginArchiveEntries, savePluginArchive } from './yunzai/plugin-archive';
 import {
   extractRepositoryArchive,
@@ -12,7 +13,6 @@ import {
   saveRepositoryArchive,
   type RepositoryArchiveTarget
 } from './yunzai/repository-archive';
-import { createDataBackup, getDataBackups, restoreDataBackup, saveUploadedDataBackup } from './yunzai/data-backup';
 
 type PrimitiveRecord = Record<string, unknown>;
 
@@ -252,6 +252,25 @@ export function getLogViewerData(fileName?: string, maxLines = 400): LogViewerDa
     truncated,
     updatedAt: Date.now()
   };
+}
+
+export function deleteLogFile(fileName: string): LogViewerData {
+  const safeName = fileName.trim();
+
+  if (!/^[\w.-]+\.log$/i.test(safeName) || safeName === '.' || safeName === '..') {
+    throw new Error('日志文件名无效');
+  }
+
+  const logsDir = join(getYunzaiDir(), 'logs');
+  const filePath = join(logsDir, safeName);
+
+  if (!existsSync(filePath)) {
+    throw new Error('日志文件不存在');
+  }
+
+  rmSync(filePath, { force: true });
+
+  return getLogViewerData();
 }
 
 function getConfigDir(): string {
