@@ -30,6 +30,7 @@ interface OnlineCatalogItem {
 /** 插件图标映射 */
 const PLUGIN_ICONS: Record<string, string> = {
   'miao-plugin': '🐱',
+  'Yunzai-genshin': '🪄',
   'StarRail-plugin': '🚂',
   'ZZZ-Plugin': '🎮',
   'xiaoyao-cvs-plugin': '📚',
@@ -49,6 +50,7 @@ const PLUGIN_ICONS: Record<string, string> = {
 /** 插件简短描述 */
 const PLUGIN_DESC: Record<string, string> = {
   'miao-plugin': '原神面板查询、角色攻略、伤害计算等',
+  'Yunzai-genshin': 'TRSS-Yunzai 原神查询与面板功能扩展',
   'StarRail-plugin': '崩坏：星穹铁道攻略与数据查询',
   'ZZZ-Plugin': '绝区零游戏数据查询',
   'xiaoyao-cvs-plugin': '原神/星铁/绝区零图鉴查询',
@@ -240,7 +242,7 @@ function RequiredPluginContent({
 }
 
 function getRecommendedGroup(dirName: string): keyof typeof RECOMMENDED_GROUP_LABELS {
-  if (['xiaoyao-cvs-plugin', 'liangshi-calc'].includes(dirName)) {
+  if (['Yunzai-genshin', 'xiaoyao-cvs-plugin', 'liangshi-calc'].includes(dirName)) {
     return 'panel';
   }
 
@@ -525,7 +527,7 @@ export default function Plugin() {
 
   // 分组：目录内已安装 / 目录内未安装
   const catalogInstalled = state.catalog.filter(c => c.installed && c.dirName !== requiredPlugin?.dirName);
-  const catalogNotInstalled = state.catalog.filter(c => !c.installed && (state.variant !== 'miao' || c.dirName !== 'miao-plugin'));
+  const catalogNotInstalled = state.catalog.filter(c => !c.installed && c.dirName !== 'miao-plugin');
   const onlineCatalogInstalled = new Set(state.onlineCatalog.filter(item => item.installed).map(item => item.repoUrl));
   const onlineFiltered = state.onlineCatalog.filter(item => {
     if (item.installed || onlineCatalogInstalled.has(item.repoUrl)) {

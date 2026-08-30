@@ -4,6 +4,7 @@ import { createEvent, EventsEnum, Format, useMessage } from 'alemonjs';
 import { renderComponentIsHtmlToBuffer } from 'jsxp';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { detectYunzaiVariant, readYunzaiPackage } from '@src/yunzai/variant';
 
 export default async (e: EventsEnum) => {
   const event = createEvent({
@@ -15,7 +16,8 @@ export default async (e: EventsEnum) => {
 
   const yunzaiDir = getYunzaiDir();
   const yunzaiInstalled = existsSync(yunzaiDir);
-  const plugins = getAllPlugins().map(p => ({
+  const variant = yunzaiInstalled ? detectYunzaiVariant(readYunzaiPackage(yunzaiDir)) : undefined;
+  const plugins = getAllPlugins(variant).map(p => ({
     ...p,
     installed: yunzaiInstalled && existsSync(join(yunzaiDir, 'plugins', p.dirName))
   }));

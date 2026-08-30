@@ -69,7 +69,7 @@ function readPureEdition(): boolean {
 export function getStatusSnapshotLocal() {
   const installedPlugins = manager.isInstalled ? getInstalledPlugins() : [];
   const installedSet = new Set(installedPlugins.map(p => p.name));
-  const catalog: CatalogItem[] = getAllPlugins().map(p => ({
+  const catalog: CatalogItem[] = getAllPlugins(manager.variant).map(p => ({
     dirName: p.dirName,
     label: p.label,
     aliases: p.aliases,

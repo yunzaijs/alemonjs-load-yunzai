@@ -8,6 +8,7 @@ import { getConfigValue } from 'alemonjs';
 import { existsSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import type { YunzaiVariant } from './yunzai/variant';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -83,11 +84,26 @@ export interface PluginInfo {
 /** 插件定义：信息 + 所有别名 */
 export interface PluginDef extends PluginInfo {
   aliases: string[];
+  /** 仅在指定 Yunzai 发行版的推荐目录中展示 */
+  variants?: YunzaiVariant[];
 }
 
 /** 内置插件列表（每个插件只定义一次） */
 const BUILTIN_PLUGINS: PluginDef[] = [
-  { aliases: ['miao', 'miaomiao', '原神'], dirName: 'miao-plugin', repoUrl: 'https://github.com/yoimiya-kokomi/miao-plugin.git', label: 'miao-plugin' },
+  {
+    aliases: ['miao', 'miaomiao', '原神'],
+    dirName: 'miao-plugin',
+    repoUrl: 'https://github.com/yoimiya-kokomi/miao-plugin.git',
+    label: 'miao-plugin',
+    variants: ['miao']
+  },
+  {
+    aliases: ['trss原神', 'trssgenshin', 'genshin'],
+    dirName: 'Yunzai-genshin',
+    repoUrl: 'https://github.com/TimeRainStarSky/Yunzai-genshin.git',
+    label: 'Yunzai-genshin',
+    variants: ['trss']
+  },
   { aliases: ['starrail', '星铁'], dirName: 'StarRail-plugin', repoUrl: 'https://gitee.com/hewang1an/StarRail-plugin.git', label: 'StarRail-plugin' },
   { aliases: ['zzz'], dirName: 'ZZZ-Plugin', repoUrl: 'https://gitee.com/bietiaop/ZZZ-Plugin.git', label: 'ZZZ-Plugin' },
   { aliases: ['图鉴'], dirName: 'xiaoyao-cvs-plugin', repoUrl: 'https://cnb.cool/tar/xiaoyao-cvs-plugin.git', label: 'xiaoyao-cvs-plugin' },
@@ -176,8 +192,8 @@ function getPluginAliasMap(): Record<string, PluginInfo> {
 /**
  * 返回所有可用插件（内置 + 用户自定义），按 dirName 去重
  */
-export function getAllPlugins(): PluginDef[] {
-  const result: PluginDef[] = [...BUILTIN_PLUGINS];
+export function getAllPlugins(variant?: YunzaiVariant): PluginDef[] {
+  const result: PluginDef[] = BUILTIN_PLUGINS.filter(plugin => !variant || !plugin.variants || plugin.variants.includes(variant));
   const seen = new Set(result.map(p => p.dirName));
   const custom = getConfig()?.plugins ?? {};
 
@@ -235,7 +251,9 @@ export function migrateLegacyYunzaiDir(): { migrated: boolean; source?: string; 
   for (const name of candidates) {
     const source = join(process.cwd(), name);
 
-    if (source === target || !existsSync(source)) { continue; }
+    if (source === target || !existsSync(source)) {
+      continue;
+    }
 
     renameSync(source, target);
 
