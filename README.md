@@ -1,6 +1,6 @@
 # LoadYunzai
 
-这是一个桥接层，通过进程隔离 + IPC 协议，将所有 Yunzai-Bot 版本的生态无缝桥接到现代 AlemonJS 框架的加载插件
+这是一个桥接层，通过进程隔离 + IPC 协议，将所有 Yunzai-Bot 版本的生态无缝桥接到现代 AlemonJS 框架的加载插件。默认安装 [TRSS-Yunzai](https://github.com/TimeRainStarSky/Yunzai)，同时兼容 Miao-Yunzai。
 
 ## 特性
 
@@ -52,7 +52,11 @@ master_key:
 
 - 安装一般操作步骤
 
-`#yz安装` -> `#yz安装插件miao` -> `#yz安装依赖` -> `#yz启动/#yz重启`
+`#yz安装` -> `#yz安装依赖` -> `#yz安装插件<别名>` -> `#yz启动/#yz重启`
+
+`#yz安装` 只克隆机器人源码；`#yz安装依赖` 才执行当前发行版所需的 Yarn 或 pnpm 安装。两者可分别重试：依赖安装失败不会再删除已克隆的机器人目录。
+
+TRSS-Yunzai 需要 pnpm 来处理其 `link:` 依赖。若系统未安装 pnpm，加载器会使用内置 Yarn 在插件运行目录中自动准备一份私有 pnpm，再继续安装依赖，无需全局安装。
 
 - 如帮助、面板等图片指令提示 Chromium/Chrome 缺失，可发送 `#yz安装浏览器`。该指令会在 Yunzai 目录执行 `npx puppeteer browsers install chrome`。
 
@@ -63,12 +67,10 @@ master_key:
 ```yaml
 # https://alemonjs.com/docs/config
 alemonjs-load-yunzai:
-  # Bot 目录名
-  bot_name: Miao-Yunzai
   # GitHub 代理前缀
   gh_proxy: https://ghfast.top/
   # Yunzai 仓库地址
-  yunzai_repo: https://github.com/yoimiya-kokomi/Miao-Yunzai.git
+  yunzai_repo: https://github.com/TimeRainStarSky/Yunzai.git
   # miao-plugin 仓库地址
   miao_plugin_repo: https://github.com/yoimiya-kokomi/miao-plugin.git
   # 同时进入 Yunzai Worker 的事件数，默认 1。
@@ -86,7 +88,7 @@ alemonjs-load-yunzai:
         - myplugin
 ```
 
-> Redis 配置会自动从顶层 `redis` 配置同步到 Miao-Yunzai，无需重复配置。
+> Redis 配置会自动从顶层 `redis` 配置同步到当前 Yunzai，无需重复配置。
 
 ```yaml
 # https://alemonjs.com/docs/config

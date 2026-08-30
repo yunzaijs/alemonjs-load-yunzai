@@ -2,12 +2,6 @@
   "alemonjs": {
     "config": [
       {
-        "description": "Bot 目录名",
-        "name": "bot_name",
-        "required": false,
-        "type": "string"
-      },
-      {
         "description": "GitHub 代理前缀",
         "name": "gh_proxy",
         "required": false,
@@ -121,5 +115,5 @@
     "url": "https://github.com/yunzaijs/alemonjs-load-yunzai.git"
   },
   "type": "module",
-  "version": "1.0.15"
+  "version": "1.0.16"
 }
