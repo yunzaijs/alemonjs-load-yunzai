@@ -145,7 +145,8 @@ jobs:
           cp -rf ./.puppeteerrc.cjs dist-release/.puppeteerrc.cjs
           cp -rf ./package.json dist-release/package.json
           cp -rf ./README.md dist-release/README.md
-          cp -rf ./yarn dist-release/yarn
+          mkdir -p dist-release/runtime
+          cp -rf ./runtime/yarn dist-release/runtime/yarn
           cp -rf ./dist dist-release/dist
           mv dist-release ../dist-release
 
