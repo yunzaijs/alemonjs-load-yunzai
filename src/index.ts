@@ -1,6 +1,7 @@
 import { defineChildren, defineRouter, lazy, logger } from 'alemonjs';
 import apiRouter from './api-router';
 import { manager } from './yunzai';
+import { migrateLegacyYunzaiDir } from './path';
 
 const responseRouter = defineRouter([
   // 帮助指令优先（更具体的正则先匹配）
@@ -39,6 +40,11 @@ export default defineChildren({
     return { responseRouter, koaRouter: apiRouter };
   },
   async onCreated() {
+    const migration = migrateLegacyYunzaiDir();
+
+    if (migration.migrated) {
+      logger.info(`[Yunzai] 已将旧目录 ${migration.source} 迁移为固定目录 ${migration.target}`);
+    }
     logger.info('[alemonjs-load-yunzai] 启动');
     if (manager.isInstalled) {
       if (!manager.lastStartOk) {

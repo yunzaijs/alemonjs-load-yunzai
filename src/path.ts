@@ -5,6 +5,7 @@
  * 支持 AlemonJS 动态修改配置后立即生效。
  */
 import { getConfigValue } from 'alemonjs';
+import { existsSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -17,13 +18,13 @@ export const PACKAGE_ROOT = join(__dirname, '..');
 export const WORKER_PATH = join(__dirname, 'yunzai', 'worker.js');
 
 /** 内置 yarn 入口脚本路径 */
-export const YARN_PATH = join(PACKAGE_ROOT, 'yarn', 'yarn.cjs');
+export const YARN_PATH = join(PACKAGE_ROOT, 'runtime', 'yarn', 'yarn.cjs');
 
 // ─── 以下均为动态读取配置 ───
 
 const DEFAULT_GH_PROXY = 'https://ghfast.top/';
-const DEFAULT_BOT_NAME = 'Miao-Yunzai';
-const DEFAULT_YUNZAI_REPO = 'https://github.com/yoimiya-kokomi/Miao-Yunzai.git';
+const YUNZAI_DIRECTORY_NAME = 'Yunzai';
+const DEFAULT_YUNZAI_REPO = 'https://github.com/TimeRainStarSky/Yunzai.git';
 const DEFAULT_MIAO_PLUGIN_REPO = 'https://github.com/yoimiya-kokomi/miao-plugin.git';
 const DEFAULT_EVENT_CONCURRENCY = 1;
 
@@ -208,9 +209,38 @@ export function getPluginInfo(alias: string): PluginInfo | undefined {
   return getPluginAliasMap()[alias.toLowerCase()];
 }
 
-/** Miao-Yunzai 安装目录（放在应用根目录下，避免污染 packages） */
+/** Yunzai 安装目录（固定名称；发行版身份读取 package.json.name） */
 export function getYunzaiDir(): string {
-  const botName = getConfig()?.bot_name ?? DEFAULT_BOT_NAME;
+  return join(process.cwd(), YUNZAI_DIRECTORY_NAME);
+}
 
-  return join(process.cwd(), botName);
+/**
+ * 迁移旧版本可配置目录名。
+ * 只在新目录不存在时执行，且只处理旧配置中的目录名和历史默认名，避免覆盖数据。
+ */
+export function migrateLegacyYunzaiDir(): { migrated: boolean; source?: string; target: string } {
+  const target = getYunzaiDir();
+
+  if (existsSync(target)) {
+    return { migrated: false, target };
+  }
+
+  const configuredName = getConfig()?.bot_name;
+  const candidates = new Set(['Miao-Yunzai']);
+
+  if (typeof configuredName === 'string' && /^[^\\/:*?"<>|]+$/.test(configuredName.trim())) {
+    candidates.add(configuredName.trim());
+  }
+
+  for (const name of candidates) {
+    const source = join(process.cwd(), name);
+
+    if (source === target || !existsSync(source)) { continue; }
+
+    renameSync(source, target);
+
+    return { migrated: true, source, target };
+  }
+
+  return { migrated: false, target };
 }

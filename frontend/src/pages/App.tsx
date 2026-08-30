@@ -154,7 +154,7 @@ export default function AppLayout() {
           </NavItem>
         ))}
 
-        <div className='text-[10px] uppercase tracking-wider opacity-25 font-medium px-3 pt-4 pb-1'>Miao-Yunzai</div>
+        <div className='text-[10px] uppercase tracking-wider opacity-25 font-medium px-3 pt-4 pb-1'>Yunzai 配置</div>
         {CONFIG_SECTIONS.map(s => (
           <NavItem key={s.key} active={activeKey === s.key} onClick={() => go(`/config/${s.key}`)}>
             {s.label}

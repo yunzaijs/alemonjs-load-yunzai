@@ -436,8 +436,7 @@ export function getRepoData() {
     master_key: masterKey,
     master_id: masterId,
     gh_proxy: pkgCfg.gh_proxy ? String(pkgCfg.gh_proxy) : 'https://ghfast.top/',
-    bot_name: pkgCfg.bot_name ? String(pkgCfg.bot_name) : 'Miao-Yunzai',
-    yunzai_repo: pkgCfg.yunzai_repo ? String(pkgCfg.yunzai_repo) : 'https://github.com/yoimiya-kokomi/Miao-Yunzai.git',
+    yunzai_repo: pkgCfg.yunzai_repo ? String(pkgCfg.yunzai_repo) : 'https://github.com/TimeRainStarSky/Yunzai.git',
     miao_plugin_repo: pkgCfg.miao_plugin_repo ? String(pkgCfg.miao_plugin_repo) : 'https://github.com/yoimiya-kokomi/miao-plugin.git',
     plugins: pkgCfg.plugins ?? {}
   };
@@ -471,7 +470,6 @@ export function saveRepoData(db: PrimitiveRecord) {
   const pkg = value['alemonjs-load-yunzai'] ?? {};
 
   pkg.gh_proxy = db.gh_proxy ?? '';
-  pkg.bot_name = db.bot_name ?? '';
   pkg.yunzai_repo = db.yunzai_repo ?? '';
   pkg.miao_plugin_repo = db.miao_plugin_repo ?? '';
   if (db.plugins && typeof db.plugins === 'object') {
@@ -483,15 +481,22 @@ export function saveRepoData(db: PrimitiveRecord) {
 
 export async function getStatusData() {
   const onlineCatalog = await getOnlineCatalogData().catch(() => []);
+  const snapshot = getStatusSnapshotLocal();
+  const isMiao = snapshot.variant === 'miao';
 
   return {
-    ...getStatusSnapshotLocal(),
+    ...snapshot,
     onlineCatalog,
     help: {
       installFlow: [
         { step: '①', label: '安装Yunzai', cmd: '#yz安装', desc: '克隆 Yunzai 仓库' },
-        { step: '②', label: '安装插件', cmd: '#yz安装插件miao', desc: '按需安装游戏插件' },
-        { step: '③', label: '安装依赖', cmd: '#yz安装依赖', desc: '统一安装所有依赖' },
+        { step: '②', label: '安装依赖', cmd: '#yz安装依赖', desc: '安装当前发行版依赖' },
+        {
+          step: '③',
+          label: '安装插件',
+          cmd: isMiao ? '#yz安装插件miao' : '#yz安装插件<别名或仓库地址>',
+          desc: isMiao ? '按需安装游戏插件' : '按需安装 Yunzai 插件'
+        },
         { step: '④', label: '启动', cmd: '#yz启动', desc: '启动 Worker 进程' }
       ],
       controls: [

@@ -2,7 +2,7 @@
  * Yunzai Worker 进程入口
  *
  * 由 manager.ts 通过 child_process.fork() 启动
- *   cwd   = Miao-Yunzai 目录
+ *   cwd   = 安装的 Yunzai 目录（默认是 TRSS-Yunzai）
  *   独立的 V8 堆、全局变量、模块解析
  *
  * 生命周期：
@@ -196,9 +196,10 @@ function warnCompatMissing(kind: 'get' | 'call' | 'construct', label: string): v
 }
 
 const wrapCompatValue = createCompatValueWrapper(warnCompatMissing);
+const compatibleConfigs = new WeakSet<object>();
 
 /**
- * 加载 Miao-Yunzai 自带的 icqq 核心工具。
+ * 加载 Yunzai 目录中可用的 icqq/oicq 核心工具。
  * jce/pb 等是纯数据编解码，可以安全复用；真正的 QQ SSO 连接仍不可从
  * OneBot/qq-bot 适配器中伪造，因此 sendUni 会明确返回不支持错误。
  */
@@ -237,13 +238,30 @@ function injectGlobals(): void {
   g.logger = createIdentityLogger(identity, appendLog);
 
   // ── redis ──
-  // 由 Miao-Yunzai 自身的 redisInit() 在 main() 中初始化 global.redis
-  // AlemonJS 启动前已将 redis 配置同步到 Miao-Yunzai/config/config/redis.yaml
+  // 由当前 Yunzai 发行版自身的 redisInit() 初始化 global.redis。
+  // AlemonJS 启动前会将 Redis 配置同步到 config/config/redis.yaml。
 
   // ── Bot 对象 ──
   // 通过 callApi 实现真实的 icqq API 调用，经由 IPC → AlemonJS → 平台适配器
   const uinList = new CompatUinList(10000);
   const icqqModule = loadIcqqModule();
+  const sleepTimeout = Symbol('timeout');
+  const adapters: any[] = [];
+
+  Object.defineProperty(adapters, 'push', {
+    configurable: true,
+    writable: true,
+    value(...items: any[]) {
+      for (const item of items) {
+        if (!item?.path || !this.some((adapter: any) => adapter.path === item.path)) {
+          Array.prototype.push.call(this, item);
+        }
+      }
+
+      return this.length;
+    }
+  });
+
   const botInstance: any = {
     nickname: 'Yunzai',
     /** Yunzai 插件常用的 Bot.logger 全局日志入口 */
@@ -268,11 +286,105 @@ function injectGlobals(): void {
     /** icqq 纯编解码工具兼容层；不代表当前平台建立了 icqq 长连接。 */
     /** icqq 模块的静态类、segment、Parser、Converter、core 等兼容字段。 */
     icqq: { ...icqqModule, core: icqqModule.core ?? {} },
+    /** TRSS 适配器在加载期向该数组注册；按 path 去重以匹配原版行为。 */
+    adapter: adapters,
+    /**
+     * 当前 Worker 没有可与插件共享的 Express/HTTP 服务。
+     * 必须显式为 null，避免兼容 Proxy 的占位对象被 Guoba 误判为可共享端口，
+     * 使其自行按配置创建独立服务。
+     */
+    express: null,
+    server: null,
+    sleepTimeout,
+    sleep: (time: number, promise?: Promise<unknown>) => {
+      const timeout = new Promise<symbol>(resolve => setTimeout(resolve, time, sleepTimeout));
+
+      return promise ? Promise.race([promise, timeout]) : timeout;
+    },
     /** icqq 底层 SSO 接口无法由 OneBot/qq-bot 适配器实现。 */
     sendUni: () => Promise.reject(new Error('Bot.sendUni 在 AlemonJS 适配器中不可用，请改用 Bot.sendApi 或平台标准 API')),
     sig: { seq: 0 },
     getFriendMap: () => botInstance.fl,
     getGroupMap: () => botInstance.gl,
+
+    /** TRSS util.String：用于插件日志、事件摘要与适配器消息转换。 */
+    String: (data: unknown, space?: number | string) => {
+      if (typeof data === 'string') {
+        return data;
+      }
+      if (data instanceof Error) {
+        return data.stack ?? data.message;
+      }
+      if (Buffer.isBuffer(data)) {
+        return `base64://${data.toString('base64')}`;
+      }
+      if (data instanceof URL) {
+        return String(data);
+      }
+
+      const seen = new WeakSet<object>();
+
+      try {
+        return (
+          JSON.stringify(
+            data,
+            (_key, value) => {
+              if (typeof value === 'bigint' || typeof value === 'function') { return String(value); }
+              if (value instanceof Map || value instanceof Set) { return [...value]; }
+              if (value instanceof Error) { return value.stack ?? value.message; }
+              if (value && typeof value === 'object') {
+                if (seen.has(value)) { return '[Circular]'; }
+                seen.add(value);
+              }
+
+              return value;
+            },
+            space
+          ) ?? String(data)
+        );
+      } catch {
+        return String(data);
+      }
+    },
+    getTimeDiff: (time1 = botInstance.stat?.start_time * 1000, time2 = Date.now()) => {
+      let elapsed = Number(time2) - Number(time1);
+      const ms = elapsed % 1000;
+
+      elapsed = Math.floor(elapsed / 1000);
+      const sec = elapsed % 60;
+
+      elapsed = Math.floor(elapsed / 60);
+      const min = elapsed % 60;
+
+      elapsed = Math.floor(elapsed / 60);
+      const hour = elapsed % 24;
+      const days = Math.floor(elapsed / 24);
+      const result = `${days ? `${days}天` : ''}${hour ? `${hour}时` : ''}${min ? `${min}分` : ''}${sec ? `${sec}秒` : ''}${ms ? ms : ''}`;
+
+      return result || '0秒';
+    },
+
+    /**
+     * TRSS 的 PluginsLoader 以此判断目录是否存在 index.js。
+     * 缺失该方法时，兼容 Proxy 会返回可调用的占位值并被当作真值，导致
+     * adapter/example/other/system 等分类目录被错误地按 index.js 导入。
+     */
+    fsStat: async (file: string, options?: Parameters<typeof fs.promises.stat>[1]) => {
+      try {
+        return await fs.promises.stat(file, options);
+      } catch {
+        return false;
+      }
+    },
+    mkdir: async (dir: string, options?: Parameters<typeof fs.promises.mkdir>[1]) => {
+      try {
+        await fs.promises.mkdir(dir, { recursive: true, ...options });
+
+        return true;
+      } catch {
+        return false;
+      }
+    },
 
     pickFriend: (uid: number) => makeFriendProxy(uid, ''),
     pickGroup: (gid: number) => makeGroupProxy(gid),
@@ -527,6 +639,11 @@ function injectGlobals(): void {
      * 展平节点为普通消息段数组
      */
     makeForwardMsg: (msgs: any[]) => buildForwardMsgCompat(msgs),
+    makeForwardArray: (msgs: any[] | any = [], node: Record<string, unknown> = {}) => {
+      const messages = Array.isArray(msgs) ? msgs : [msgs];
+
+      return buildForwardMsgCompat(messages.map(message => ({ ...node, message })));
+    },
 
     // ── EventEmitter 兼容（yenai-plugin 等插件在加载时调用 Bot.on） ──
     // eslint-disable-next-line func-call-spacing
@@ -1233,7 +1350,7 @@ function injectMasterQQ(userId: number | string): void {
 
 /** 兼容 TRSS 的 cfg.getGroup(selfId, groupId) 调用签名。 */
 function installConfigCompatibility(cfg: any): void {
-  if (!cfg || typeof cfg.getGroup !== 'function' || cfg.__alemonGetGroupCompat) {
+  if (!cfg || typeof cfg.getGroup !== 'function' || compatibleConfigs.has(cfg)) {
     return;
   }
 
@@ -1241,7 +1358,7 @@ function installConfigCompatibility(cfg: any): void {
     const getGroup = cfg.getGroup.bind(cfg);
 
     cfg.getGroup = (first: any, second?: any, ...rest: any[]) => getGroup(second === undefined ? first : second, ...rest);
-    Object.defineProperty(cfg, '__alemonGetGroupCompat', { value: true, enumerable: false, configurable: false });
+    compatibleConfigs.add(cfg);
   } catch {
     log('warn', '[compat] cfg.getGroup 不可注入双参数兼容');
   }
@@ -1559,13 +1676,13 @@ async function main(): Promise<void> {
     fs.writeFileSync(commandLog, '');
   }
 
-  // 2.5 初始化 Redis — 调用 Miao-Yunzai 自身的 redisInit()，读取 config/config/redis.yaml
+  // 2.5 初始化 Redis — 调用当前发行版自身的 redisInit()
   try {
     const redisMod = await import(pathToFileURL(path.join(cwd, 'lib', 'config', 'redis.js')).href);
     const redisInit = redisMod.default ?? redisMod.redisInit;
 
     await redisInit();
-    log('info', 'Redis 初始化成功（Miao-Yunzai）');
+    log('info', 'Redis 初始化成功（Yunzai）');
   } catch (err: any) {
     log('error', `Redis 初始化失败: ${err.message}`);
     ipcSend({ type: 'error', message: `Redis 初始化失败: ${err.message}` });

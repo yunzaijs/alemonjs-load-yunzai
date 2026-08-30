@@ -21,7 +21,6 @@ const INITIAL = {
   master_key: '',
   master_id: '',
   gh_proxy: '',
-  bot_name: '',
   yunzai_repo: '',
   miao_plugin_repo: ''
 };
@@ -125,7 +124,6 @@ export default function Repo({ section }: { section: string }) {
           master_key: arr2str(d.master_key),
           master_id: arr2str(d.master_id),
           gh_proxy: d.gh_proxy ?? '',
-          bot_name: d.bot_name ?? '',
           yunzai_repo: d.yunzai_repo ?? '',
           miao_plugin_repo: d.miao_plugin_repo ?? ''
         });
@@ -407,21 +405,13 @@ export default function Repo({ section }: { section: string }) {
                     <Input
                       name='yunzai_repo'
                       value={formData.yunzai_repo}
-                      placeholder='https://github.com/.../Miao-Yunzai.git'
+                      placeholder='https://github.com/.../Yunzai.git'
                       onChange={handleChange}
                       className='w-full px-3 py-1.5 text-sm rounded-lg'
                     />
                   </div>
-                  <div>
-                    <div className='text-[11px] opacity-45 mb-1'>机器人目录名</div>
-                    <Input
-                      name='bot_name'
-                      value={formData.bot_name}
-                      placeholder='Miao-Yunzai'
-                      onChange={handleChange}
-                      className='w-full px-3 py-1.5 text-sm rounded-lg'
-                    />
-                    <div className='text-[10px] opacity-35 mt-1'>控制本地 Yunzai 文件夹名称；ZIP 解压也会使用此目录。</div>
+                  <div className='text-[10px] opacity-40'>
+                    本地目录固定为 <code>Yunzai</code>；具体发行版和机器人身份以该目录下 package.json 的 name 为准。
                   </div>
                 </>
               ) : (

@@ -7,4 +7,5 @@
  */
 export { default as yunzaiBridge } from './bridge';
 export { manager } from './manager';
+export { detectYunzaiVariant, isMiaoYunzai, isOriginalYunzai, isTrssYunzai, readYunzaiPackage } from './variant';
 export type * from './protocol';

@@ -2,12 +2,6 @@
   "alemonjs": {
     "config": [
       {
-        "description": "Bot 目录名",
-        "name": "bot_name",
-        "required": false,
-        "type": "string"
-      },
-      {
         "description": "GitHub 代理前缀",
         "name": "gh_proxy",
         "required": false,
@@ -148,6 +142,7 @@
     "app": "node index.js",
     "build": "lvy build",
     "dev": "lvy app.ts --serverPort 17187",
+    "dev-fe": "yarn --cwd frontend dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint src --ext .ts,.tsx,.js --max-warnings=0",

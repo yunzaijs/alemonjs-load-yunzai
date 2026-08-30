@@ -42,9 +42,9 @@ export default defineConfig({
       compress: NODE_ENV
         ? {}
         : {
-          drop_console: true,
-          drop_debugger: true
-        }
+            drop_console: true,
+            drop_debugger: true
+          }
     },
     rollupOptions: {
       output: {

@@ -81,7 +81,7 @@ function ActionButton({
 
   return (
     <Tooltip text={reason} position='top'>
-      <span className='block w-full'>{button}</span>
+      <span className='inline-flex shrink-0'>{button}</span>
     </Tooltip>
   );
 }
@@ -139,7 +139,7 @@ export default function Manage() {
   }, []);
 
   const sendAction = (action: string, label: string, extra?: Record<string, string>) => {
-    if (loading || isDesktopRuntime) {
+    if ((loading && action !== 'cancel') || isDesktopRuntime) {
       return;
     }
     setLoading(label);
@@ -168,6 +168,7 @@ export default function Manage() {
   const canForceUpdate = state.installed && !state.busy && !loading && !isDesktopRuntime;
   const canInstallDeps = state.installed && !state.busy && !loading && !isDesktopRuntime;
   const canUninstall = state.installed && !state.busy && !loading && !isDesktopRuntime;
+  const showCardActions = state.installed && !state.busy && !loading && !isDesktopRuntime;
   const busyLabel = loading || state.busyTask || (lastAction ? `${lastAction}中...` : '处理中...');
   const getDisabledReason = (action: 'install' | 'start' | 'stop' | 'restart' | 'update' | 'force_update' | 'install_deps' | 'uninstall') => {
     if (isDesktopRuntime) {
@@ -245,73 +246,69 @@ export default function Manage() {
             <TagDiv className='px-3 py-1 rounded-full text-xs font-medium'>{statusTagLabel}</TagDiv>
           </div>
 
-          {state.installed && (
-            <div className='mt-3 flex flex-wrap justify-end gap-2'>
-              {!isDesktopRuntime && (
+          {showCardActions && (
+            <div className='mt-4 flex flex-wrap items-center justify-start gap-2 sm:justify-end'>
+              {!state.running ? (
                 <>
-                  {!state.running ? (
-                    <>
-                      <ActionButton
-                        className='px-3 py-1.5 rounded-lg text-sm font-medium'
-                        disabled={!canStart}
-                        reason={!canStart ? getDisabledReason('start') : undefined}
-                        onClick={() => sendAction('start', '启动')}
-                      >
-                        启动
-                      </ActionButton>
-                      <ActionButton
-                        className='px-3 py-1.5 rounded-lg text-sm font-medium bg-red-500/10 hover:bg-red-500/20 text-red-400'
-                        disabled={!canUninstall}
-                        reason={!canUninstall ? getDisabledReason('uninstall') : undefined}
-                        onClick={() => dangerAction('uninstall', '卸载 Yunzai')}
-                      >
-                        卸载 Yunzai
-                      </ActionButton>
-                      <ActionButton
-                        className='px-3 py-1.5 rounded-lg text-sm font-medium'
-                        disabled={!canUpdate}
-                        reason={!canUpdate ? getDisabledReason('update') : undefined}
-                        onClick={() => sendAction('update', '更新')}
-                      >
-                        更新
-                      </ActionButton>
-                      <ActionButton
-                        className='px-3 py-1.5 rounded-lg text-sm font-medium'
-                        disabled={!canForceUpdate}
-                        reason={!canForceUpdate ? getDisabledReason('force_update') : undefined}
-                        onClick={() => sendAction('force_update', '强制更新')}
-                      >
-                        强制更新
-                      </ActionButton>
-                      <ActionButton
-                        className='px-3 py-1.5 rounded-lg text-sm font-medium'
-                        disabled={!canInstallDeps}
-                        reason={!canInstallDeps ? getDisabledReason('install_deps') : undefined}
-                        onClick={() => sendAction('install_deps', '安装依赖')}
-                      >
-                        重装依赖
-                      </ActionButton>
-                    </>
-                  ) : (
-                    <>
-                      <ActionButton
-                        className='px-3 py-1.5 rounded-lg text-sm font-medium'
-                        disabled={!canStop}
-                        reason={!canStop ? getDisabledReason('stop') : undefined}
-                        onClick={() => sendAction('stop', '停止')}
-                      >
-                        停止
-                      </ActionButton>
-                      <ActionButton
-                        className='px-3 py-1.5 rounded-lg text-sm font-medium'
-                        disabled={!canRestart}
-                        reason={!canRestart ? getDisabledReason('restart') : undefined}
-                        onClick={() => sendAction('restart', '重启')}
-                      >
-                        重启
-                      </ActionButton>
-                    </>
-                  )}
+                  <ActionButton
+                    className='px-3 py-1.5 rounded-lg text-sm font-medium'
+                    disabled={!canStart}
+                    reason={!canStart ? getDisabledReason('start') : undefined}
+                    onClick={() => sendAction('start', '启动')}
+                  >
+                    启动
+                  </ActionButton>
+                  <ActionButton
+                    className='px-3 py-1.5 rounded-lg text-sm font-medium bg-red-500/10 hover:bg-red-500/20 text-red-400'
+                    disabled={!canUninstall}
+                    reason={!canUninstall ? getDisabledReason('uninstall') : undefined}
+                    onClick={() => dangerAction('uninstall', '卸载 Yunzai')}
+                  >
+                    卸载
+                  </ActionButton>
+                  <ActionButton
+                    className='px-3 py-1.5 rounded-lg text-sm font-medium'
+                    disabled={!canUpdate}
+                    reason={!canUpdate ? getDisabledReason('update') : undefined}
+                    onClick={() => sendAction('update', '更新')}
+                  >
+                    更新
+                  </ActionButton>
+                  <ActionButton
+                    className='px-3 py-1.5 rounded-lg text-sm font-medium'
+                    disabled={!canForceUpdate}
+                    reason={!canForceUpdate ? getDisabledReason('force_update') : undefined}
+                    onClick={() => sendAction('force_update', '强制更新')}
+                  >
+                    强制更新
+                  </ActionButton>
+                  <ActionButton
+                    className='px-3 py-1.5 rounded-lg text-sm font-medium'
+                    disabled={!canInstallDeps}
+                    reason={!canInstallDeps ? getDisabledReason('install_deps') : undefined}
+                    onClick={() => sendAction('install_deps', '安装依赖')}
+                  >
+                    重装依赖
+                  </ActionButton>
+                </>
+              ) : (
+                <>
+                  <ActionButton
+                    className='px-3 py-1.5 rounded-lg text-sm font-medium'
+                    disabled={!canStop}
+                    reason={!canStop ? getDisabledReason('stop') : undefined}
+                    onClick={() => sendAction('stop', '停止')}
+                  >
+                    停止
+                  </ActionButton>
+                  <ActionButton
+                    className='px-3 py-1.5 rounded-lg text-sm font-medium'
+                    disabled={!canRestart}
+                    reason={!canRestart ? getDisabledReason('restart') : undefined}
+                    onClick={() => sendAction('restart', '重启')}
+                  >
+                    重启
+                  </ActionButton>
                 </>
               )}
             </div>
@@ -324,12 +321,12 @@ export default function Manage() {
         <div className='flex justify-end'>
           <ActionButton
             className='px-4 py-2 rounded-xl text-sm font-semibold shadow-sm'
-            onClick={() => sendAction('install', '安装 Yunzai')}
+            onClick={() => sendAction('install', '安装机器人')}
             disabled={!canInstall}
             reason={!canInstall ? getDisabledReason('install') : undefined}
             style={{ background: 'linear-gradient(135deg, #d5c8b2 0%, #8f8c76 100%)' }}
           >
-            安装 Yunzai
+            安装机器人
           </ActionButton>
         </div>
       )}

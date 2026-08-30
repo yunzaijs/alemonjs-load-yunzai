@@ -8,22 +8,15 @@
   "editor.tabSize": 2,
   "editor.insertSpaces": true,
   "editor.detectIndentation": false,
-  
+
   // ESLint 配置
-  "eslint.workingDirectories": [
-    "./",
-  ],
-  "eslint.validate": [
-    "javascript",
-    "javascriptreact",
-    "typescript",
-    "typescriptreact"
-  ],
-  
+  "eslint.workingDirectories": ["./"],
+  "eslint.validate": ["javascript", "javascriptreact", "typescript", "typescriptreact"],
+
   // Prettier 配置
   "prettier.configPath": "./.prettierrc",
   "prettier.requireConfig": true,
-  
+
   // 搜索排除
   "search.exclude": {
     "**/node_modules": true,
@@ -33,7 +26,7 @@
     "**/package-lock.json": true,
     "**/*.log": true
   },
-  
+
   // 监视文件排除 (提高性能)
   "files.watcherExclude": {
     "**/node_modules/**": true,
@@ -42,44 +35,41 @@
     "**/.git/**": true,
     "**/logs/**": true
   },
-  
+
   // Tailwind CSS 支持
-  "tailwindCSS.experimental.classRegex": [
-    ["clsx\\(([^)]*)\\)", "(?:'|\"|`)([^']*)(?:'|\"|`)"],
-    ["className\\s*:\\s*[\"'`]([^\"'`]*)[\"'`]"]
-  ],
-  
+  "tailwindCSS.experimental.classRegex": [["clsx\\(([^)]*)\\)", "(?:'|\"|`)([^']*)(?:'|\"|`)"], ["className\\s*:\\s*[\"'`]([^\"'`]*)[\"'`]"]],
+
   // 终端配置
   "terminal.integrated.defaultProfile.osx": "zsh",
   "terminal.integrated.cwd": "${workspaceFolder}",
-  
+
   // Git 配置
   "git.enableSmartCommit": true,
   "git.autofetch": true,
-  
+
   // 括号配对高亮
   "editor.bracketPairColorization.enabled": true,
   "editor.guides.bracketPairs": true,
-  
+
   // 代码提示
   "editor.suggest.snippetsPreventQuickSuggestions": false,
   "editor.quickSuggestions": {
     "strings": true
   },
-  
+
   // 自动保存
   "files.autoSave": "onFocusChange",
-  
+
   // 空白字符显示
   "editor.renderWhitespace": "boundary",
-  
+
   // 行号
   "editor.lineNumbers": "on",
-  
+
   // 小地图
   "editor.minimap.enabled": true,
   "editor.minimap.scale": 2,
-  
+
   // 语言特定设置
   "[typescript]": {
     "editor.defaultFormatter": "vscode.typescript-language-features"

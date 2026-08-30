@@ -79,6 +79,8 @@ export function getStatusSnapshotLocal() {
 
   return {
     status: manager.getStatus(),
+    packageName: manager.packageName,
+    variant: manager.variant,
     installed: manager.isInstalled,
     pureEdition: readPureEdition(),
     running: manager.isRunning,
@@ -99,7 +101,7 @@ export async function executeYunzaiActionLocal(data: PrimitiveRecord) {
     case 'install':
       await manager.install();
 
-      return { message: 'Yunzai 安装完成' };
+      return { message: 'Yunzai 源码安装完成，请继续执行“安装依赖”' };
     case 'uninstall':
       await manager.uninstall();
 

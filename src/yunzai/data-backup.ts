@@ -123,12 +123,12 @@ export function getDataBackups(): DataBackupItem[] {
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
-/** 将 Miao-Yunzai/data 打成独立 ZIP。 */
+/** 将 Yunzai/data 打成独立 ZIP。 */
 export function createDataBackup(): DataBackupItem {
   const source = dataPath();
 
   if (!existsSync(source) || !statSync(source).isDirectory()) {
-    throw new Error('未找到 Miao-Yunzai/data 目录');
+    throw new Error('未找到 Yunzai/data 目录');
   }
 
   mkdirSync(BACKUP_DIR, { recursive: true });
@@ -184,7 +184,7 @@ export function saveUploadedDataBackup(uploadedPath: string, originalName: strin
   return result;
 }
 
-/** 将备份解压到临时目录，校验完成后以目录替换方式覆盖 Miao-Yunzai/data。 */
+/** 将备份解压到临时目录，校验完成后以目录替换方式覆盖 Yunzai/data。 */
 export async function restoreDataBackup(idValue: unknown): Promise<DataBackupItem> {
   assertStopped('恢复数据备份');
   assertBackupId(idValue);

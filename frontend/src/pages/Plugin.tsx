@@ -74,6 +74,7 @@ const RECOMMENDED_GROUP_LABELS: Record<string, string> = {
 
 interface PluginState {
   installed: boolean;
+  variant: 'miao' | 'trss' | 'yunzai' | 'unknown';
   pureEdition: boolean;
   busy: boolean;
   plugins: PluginItem[];
@@ -143,6 +144,101 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
   );
 }
 
+function RequiredPluginContent({
+  plugin,
+  installedPlugin,
+  pureEdition,
+  disabled,
+  onAction,
+  onDangerAction
+}: {
+  plugin: CatalogItem;
+  installedPlugin?: PluginItem;
+  pureEdition: boolean;
+  disabled: boolean;
+  onAction: (action: string, label: string, extra?: Record<string, string>) => void;
+  onDangerAction: (action: string, label: string, extra?: Record<string, string>) => void;
+}) {
+  return (
+    <PrimaryDiv className='px-4 py-4 space-y-3'>
+      <div
+        className='rounded-xl px-4 py-3 text-[12px]'
+        style={{
+          background: plugin.installed ? 'rgba(34,197,94,.08)' : 'rgba(245,158,11,.08)',
+          border: plugin.installed ? '1px solid rgba(34,197,94,.15)' : '1px solid rgba(245,158,11,.18)'
+        }}
+      >
+        {pureEdition
+          ? plugin.installed
+            ? '当前为 Miao-Yunzai 纯净版。miao-plugin 已安装，将作为可选增强插件提供扩展能力。'
+            : '当前为 Miao-Yunzai 纯净版。miao-plugin 为可选插件，未安装时相关扩展能力会降级，但宿主仍可正常启动。'
+          : plugin.installed
+            ? 'miao-plugin 已安装。该插件被视为核心依赖，建议保留并优先维护。'
+            : 'miao-plugin 被视为必装插件。未安装时，部分能力可能出现异常或不可用。'}
+      </div>
+
+      <div className='relative flex items-start gap-3'>
+        <div className='w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0' style={{ background: 'rgba(128,128,128,.06)' }}>
+          {PLUGIN_ICONS[plugin.dirName] ?? '🐱'}
+        </div>
+        <div className='flex-1 min-w-0 pr-24'>
+          <div className='flex items-center gap-2'>
+            <span className='text-[13px] font-semibold truncate'>{plugin.label}</span>
+            {plugin.installed && <span className='shrink-0 w-1.5 h-1.5 rounded-full bg-green-500' title='已安装' />}
+          </div>
+          <div className='text-[11px] opacity-40 mt-0.5'>{PLUGIN_DESC[plugin.dirName] ?? plugin.aliases.join(' / ')}</div>
+          <div className='absolute right-0 top-0 flex items-center gap-1.5'>
+            {!plugin.installed && (
+              <Button
+                className='px-3 py-1 text-[11px] rounded-lg font-medium'
+                onClick={() => onAction('install_plugin', `安装 ${plugin.label}`, { plugin: plugin.aliases[0] })}
+                disabled={disabled}
+                style={{ background: 'linear-gradient(135deg, #d5c8b2 0%, #8f8c76 100%)' }}
+              >
+                立即安装
+              </Button>
+            )}
+            {plugin.installed && (
+              <>
+                {installedPlugin?.isGit && (
+                  <Button
+                    className='px-2.5 py-1 text-[11px] rounded-lg font-medium'
+                    onClick={() => onAction('update_plugin', `更新 ${plugin.label}`, { plugin: plugin.dirName })}
+                    disabled={disabled}
+                  >
+                    更新
+                  </Button>
+                )}
+                <SmartDropdown
+                  buttons={[
+                    ...(installedPlugin?.isGit
+                      ? [
+                          {
+                            children: '强制更新',
+                            onClick: () => onAction('force_update_plugin', `强制更新 ${plugin.label}`, { plugin: plugin.dirName }),
+                            disabled
+                          }
+                        ]
+                      : []),
+                    {
+                      children: '卸载',
+                      onClick: () => onDangerAction('uninstall_plugin', `卸载 ${plugin.label}`, { plugin: plugin.dirName }),
+                      disabled,
+                      className: 'text-red-400'
+                    }
+                  ]}
+                >
+                  <Button className='px-2 py-1 text-[11px] rounded-lg'>···</Button>
+                </SmartDropdown>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </PrimaryDiv>
+  );
+}
+
 function getRecommendedGroup(dirName: string): keyof typeof RECOMMENDED_GROUP_LABELS {
   if (['xiaoyao-cvs-plugin', 'liangshi-calc'].includes(dirName)) {
     return 'panel';
@@ -188,6 +284,7 @@ export default function Plugin() {
   const cachedOnlineCatalog = readOnlinePluginCache();
   const [state, setState] = useState<PluginState>({
     installed: false,
+    variant: 'unknown',
     pureEdition: false,
     busy: false,
     plugins: [],
@@ -204,7 +301,7 @@ export default function Plugin() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [isArchiveDragActive, setIsArchiveDragActive] = useState(false);
   const [onlineKeyword, setOnlineKeyword] = useState('');
-  const [pluginTab, setPluginTab] = useState<'required' | 'installed' | 'catalog' | 'online' | 'custom'>('required');
+  const [pluginTab, setPluginTab] = useState<'installed' | 'catalog' | 'online' | 'custom'>('installed');
   const [confirmAction, setConfirmAction] = useState<{ action: string; label: string; extra?: Record<string, string> } | null>(null);
   const [lastAction, setLastAction] = useState('');
   const archiveInputRef = useRef<HTMLInputElement>(null);
@@ -233,6 +330,7 @@ export default function Plugin() {
 
         setState({
           installed: d.installed as boolean,
+          variant: d.variant === 'miao' || d.variant === 'trss' || d.variant === 'yunzai' ? d.variant : 'unknown',
           pureEdition: d.pureEdition === true,
           busy: d.busy as boolean,
           plugins,
@@ -422,12 +520,12 @@ export default function Plugin() {
 
   const isDisabled = !!loading || state.busy || isDesktopRuntime;
   const busyLabel = loading || (state.busy ? '处理中...' : '') || (lastAction ? `${lastAction}中...` : '处理中...');
-  const requiredPlugin = state.catalog.find(item => item.dirName === 'miao-plugin') ?? null;
+  const requiredPlugin = state.variant === 'miao' ? (state.catalog.find(item => item.dirName === 'miao-plugin') ?? null) : null;
   const requiredInstalledPlugin = state.plugins.find(item => item.name === 'miao-plugin') ?? null;
 
   // 分组：目录内已安装 / 目录内未安装
-  const catalogInstalled = state.catalog.filter(c => c.installed);
-  const catalogNotInstalled = state.catalog.filter(c => !c.installed && c.dirName !== 'miao-plugin');
+  const catalogInstalled = state.catalog.filter(c => c.installed && c.dirName !== requiredPlugin?.dirName);
+  const catalogNotInstalled = state.catalog.filter(c => !c.installed && (state.variant !== 'miao' || c.dirName !== 'miao-plugin'));
   const onlineCatalogInstalled = new Set(state.onlineCatalog.filter(item => item.installed).map(item => item.repoUrl));
   const onlineFiltered = state.onlineCatalog.filter(item => {
     if (item.installed || onlineCatalogInstalled.has(item.repoUrl)) {
@@ -447,6 +545,7 @@ export default function Plugin() {
   const catalogDirNames = new Set(state.catalog.map(c => c.dirName));
   const extraInstalled = state.plugins.filter(p => !catalogDirNames.has(p.name));
   const installedPluginMap = new Map(state.plugins.map(item => [item.name, item]));
+  const installedCount = catalogInstalled.length + extraInstalled.length + Number(requiredPlugin?.installed);
   const recommendedGroups = Object.entries(
     catalogNotInstalled.reduce<Record<string, CatalogItem[]>>((acc, item) => {
       const group = getRecommendedGroup(item.dirName);
@@ -507,9 +606,6 @@ export default function Plugin() {
             <span className='text-sm font-semibold'>🧩 插件分类</span>
           </div>
           <div className='flex flex-wrap items-center gap-2'>
-            <TabBtn active={pluginTab === 'required'} onClick={() => setPluginTab('required')}>
-              必装插件
-            </TabBtn>
             <TabBtn active={pluginTab === 'installed'} onClick={() => setPluginTab('installed')}>
               已安装
             </TabBtn>
@@ -526,104 +622,35 @@ export default function Plugin() {
         </HeaderDiv>
       </SecondaryDiv>
 
-      {pluginTab === 'required' && requiredPlugin && (
-        <SecondaryDiv className='rounded-xl overflow-hidden'>
-          <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>
-            <div className='flex items-center gap-2'>
-              <span className='text-sm font-semibold'>{state.pureEdition ? '🐱 可选增强插件' : '🐱 必装插件'}</span>
-              <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>{requiredPlugin.installed ? '已安装' : '未安装'}</TagDiv>
-            </div>
-          </HeaderDiv>
-          <PrimaryDiv className='px-4 py-4 space-y-3'>
-            <div
-              className='rounded-xl px-4 py-3 text-[12px]'
-              style={{
-                background: requiredPlugin.installed ? 'rgba(34,197,94,.08)' : 'rgba(245,158,11,.08)',
-                border: requiredPlugin.installed ? '1px solid rgba(34,197,94,.15)' : '1px solid rgba(245,158,11,.18)'
-              }}
-            >
-              {state.pureEdition
-                ? requiredPlugin.installed
-                  ? '当前为 Miao-Yunzai 纯净版。miao-plugin 已安装，将作为可选增强插件提供扩展能力。'
-                  : '当前为 Miao-Yunzai 纯净版。miao-plugin 为可选插件，未安装时相关扩展能力会降级，但宿主仍可正常启动。'
-                : requiredPlugin.installed
-                  ? 'miao-plugin 已安装。该插件被视为核心依赖，建议保留并优先维护。'
-                  : 'miao-plugin 被视为必装插件。未安装时，部分能力可能出现异常或不可用。'}
-            </div>
-
-            <div className='relative flex items-start gap-3'>
-              <div className='w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0' style={{ background: 'rgba(128,128,128,.06)' }}>
-                {PLUGIN_ICONS[requiredPlugin.dirName] ?? '🐱'}
-              </div>
-              <div className='flex-1 min-w-0 pr-24'>
-                <div className='flex items-center gap-2'>
-                  <span className='text-[13px] font-semibold truncate'>{requiredPlugin.label}</span>
-                  {requiredPlugin.installed && <span className='shrink-0 w-1.5 h-1.5 rounded-full bg-green-500' title='已安装' />}
-                </div>
-                <div className='text-[11px] opacity-40 mt-0.5'>{PLUGIN_DESC[requiredPlugin.dirName] ?? requiredPlugin.aliases.join(' / ')}</div>
-                <div className='absolute right-0 top-0 flex items-center gap-1.5'>
-                  {!requiredPlugin.installed && (
-                    <Button
-                      className='px-3 py-1 text-[11px] rounded-lg font-medium'
-                      onClick={() => sendAction('install_plugin', `安装 ${requiredPlugin.label}`, { plugin: requiredPlugin.aliases[0] })}
-                      disabled={isDisabled}
-                      style={{ background: 'linear-gradient(135deg, #d5c8b2 0%, #8f8c76 100%)' }}
-                    >
-                      立即安装
-                    </Button>
-                  )}
-                  {requiredPlugin.installed && (
-                    <>
-                      {requiredInstalledPlugin?.isGit && (
-                        <Button
-                          className='px-2.5 py-1 text-[11px] rounded-lg font-medium'
-                          onClick={() => sendAction('update_plugin', `更新 ${requiredPlugin.label}`, { plugin: requiredPlugin.dirName })}
-                          disabled={isDisabled}
-                        >
-                          更新
-                        </Button>
-                      )}
-                      <SmartDropdown
-                        buttons={[
-                          ...(requiredInstalledPlugin?.isGit
-                            ? [
-                                {
-                                  children: '强制更新',
-                                  onClick: () => sendAction('force_update_plugin', `强制更新 ${requiredPlugin.label}`, { plugin: requiredPlugin.dirName }),
-                                  disabled: isDisabled
-                                }
-                              ]
-                            : []),
-                          {
-                            children: '卸载',
-                            onClick: () => dangerAction('uninstall_plugin', `卸载 ${requiredPlugin.label}`, { plugin: requiredPlugin.dirName }),
-                            disabled: isDisabled,
-                            className: 'text-red-400'
-                          }
-                        ]}
-                      >
-                        <Button className='px-2 py-1 text-[11px] rounded-lg'>···</Button>
-                      </SmartDropdown>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          </PrimaryDiv>
-        </SecondaryDiv>
-      )}
-
       {/* ── 已安装插件 ── */}
-      {pluginTab === 'installed' && (catalogInstalled.length > 0 || extraInstalled.length > 0) && (
+      {pluginTab === 'installed' && (Boolean(requiredPlugin) || catalogInstalled.length > 0 || extraInstalled.length > 0) && (
         <SecondaryDiv className='rounded-xl overflow-hidden'>
           <HeaderDiv className='px-4 py-2.5 flex items-center justify-between'>
             <div className='flex items-center gap-2'>
               <span className='text-sm font-semibold'>✅ 已安装</span>
-              <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>{catalogInstalled.length + extraInstalled.length}</TagDiv>
+              <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>{installedCount}</TagDiv>
             </div>
           </HeaderDiv>
           <Collapse
             items={[
+              ...(requiredPlugin
+                ? [
+                    {
+                      key: 'installed-required',
+                      label: `${state.pureEdition ? '🐱 可选增强插件' : '🐱 必装插件'} · ${requiredPlugin.installed ? '已安装' : '未安装'}`,
+                      children: (
+                        <RequiredPluginContent
+                          plugin={requiredPlugin}
+                          installedPlugin={requiredInstalledPlugin ?? undefined}
+                          pureEdition={state.pureEdition}
+                          disabled={isDisabled}
+                          onAction={sendAction}
+                          onDangerAction={dangerAction}
+                        />
+                      )
+                    }
+                  ]
+                : []),
               ...(catalogInstalled.length > 0
                 ? [
                     {
@@ -756,7 +783,7 @@ export default function Plugin() {
         </SecondaryDiv>
       )}
 
-      {pluginTab === 'installed' && catalogInstalled.length === 0 && extraInstalled.length === 0 && (
+      {pluginTab === 'installed' && !requiredPlugin && catalogInstalled.length === 0 && extraInstalled.length === 0 && (
         <PrimaryDiv className='rounded-xl px-4 py-6 text-center'>
           <div className='text-sm opacity-40'>当前还没有已安装插件</div>
         </PrimaryDiv>

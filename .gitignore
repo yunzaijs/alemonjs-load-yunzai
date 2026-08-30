@@ -7,7 +7,9 @@ node_modules
 /build
 /dist
 /assets
-/runtime
+/runtime/*
+!/runtime/yarn/
+!/runtime/yarn/**
 /index.html
 *.log
 .env.*
@@ -25,3 +27,4 @@ mysql-connector-j-9.1.0
 CLAUDE.md
 .omc
 /Miao-Yunzai
+/Yunzai

@@ -76,7 +76,7 @@ export default function Data() {
       return;
     }
 
-    if (!window.confirm(`恢复“${backup.name}”会覆盖当前 Miao-Yunzai/data 数据。请确认机器人已停止，是否继续？`)) {
+    if (!window.confirm(`恢复“${backup.name}”会覆盖当前 Yunzai/data 数据。请确认机器人已停止，是否继续？`)) {
       return;
     }
 
@@ -151,7 +151,7 @@ export default function Data() {
         <HeaderDiv className='px-4 py-2.5 flex flex-wrap items-center justify-between gap-2'>
           <div className='flex items-center gap-2'>
             <span className='text-sm font-semibold'>💾 数据备份</span>
-            <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>Miao-Yunzai/data</TagDiv>
+            <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>Yunzai/data</TagDiv>
           </div>
           <div className='flex items-center gap-2'>
             <Button type='button' className='px-3 py-1 rounded-lg text-[11px] font-medium' onClick={() => void refresh()} disabled={!!loading}>

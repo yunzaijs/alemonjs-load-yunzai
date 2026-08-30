@@ -2,7 +2,7 @@
  * Yunzai 进程管理器
  *
  * 职责：
- * 1. Git 操作 — clone / pull Miao-Yunzai 仓库
+ * 1. Git 操作 — clone / pull 当前 Yunzai 发行版仓库
  * 2. 子进程生命周期 — fork / stop / restart Worker
  * 3. IPC 通信 — 父子进程消息收发
  */
@@ -14,10 +14,11 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PluginInfo } from '../path';
-import { getDefaultRepo, getGhProxy, getYunzaiDir, WORKER_PATH, YARN_PATH } from '../path';
+import { getDefaultRepo, getGhProxy, getYunzaiDir, PACKAGE_ROOT, WORKER_PATH, YARN_PATH } from '../path';
 import type { GitResult } from './git';
 import { gitClone, gitFetchAll, gitPull, gitResetHard } from './git';
 import type { IPCApiRequest, IPCReply, ParentToWorker, WorkerToParent } from './protocol';
+import { detectYunzaiVariant, readYunzaiPackage, type YunzaiVariant } from './variant';
 
 type ReplyHandler = (reply: IPCReply) => void;
 type ApiRequestHandler = (req: IPCApiRequest) => void;
@@ -152,6 +153,16 @@ class YunzaiManager {
     return this.taskName !== null;
   }
 
+  /** 当前安装的 Yunzai 发行版；安装前返回 unknown。 */
+  get variant(): YunzaiVariant {
+    return detectYunzaiVariant(readYunzaiPackage(getYunzaiDir()));
+  }
+
+  /** package.json 中声明的机器人/发行版身份。 */
+  get packageName(): string {
+    return String(readYunzaiPackage(getYunzaiDir())?.name ?? '');
+  }
+
   /** 当前任务名称 */
   get busyTaskName(): string {
     return this.taskName ?? '';
@@ -218,13 +229,9 @@ class YunzaiManager {
       logger.info(`[Yunzai] 正在克隆 ${repoUrl} ...`);
       await this.execGit(gitClone(repoUrl, yunzaiDir));
       this.throwIfCancelled();
-      this.ensureWorkspaces();
-      this.throwIfCancelled();
-      logger.info('[Yunzai] 克隆完成，正在安装依赖...');
-      await this.npmInstall(yunzaiDir);
-      this.throwIfCancelled();
-      logger.info('[Yunzai] 依赖安装完成');
+      logger.info('[Yunzai] 克隆完成。请单独执行“安装依赖”后再启动');
     } catch (err) {
+      logger.error(`[Yunzai] 安装失败: ${(err as Error)?.message ?? String(err)}`);
       // 安装失败/取消 → 清理残留目录，避免 isInstalled 死锁
       if (existsSync(yunzaiDir)) {
         try {
@@ -342,7 +349,10 @@ class YunzaiManager {
     }
   }
 
-  /** 安装并自动启动（原子操作，单锁覆盖完整流程） */
+  /**
+   * 兼容保留的一键安装入口；普通安装流程应依次调用 install、installDeps、start。
+   * 该方法只在调用方明确要求“一键安装并启动”时组合执行，不改变 install 的职责。
+   */
   async installAndStart(repoUrl = getDefaultRepo()): Promise<void> {
     const yunzaiDir = getYunzaiDir();
 
@@ -398,14 +408,14 @@ class YunzaiManager {
 
   // ─── 进程控制（内部方法，无锁） ───
 
-  /** 将 AlemonJS 的 Redis 配置同步到 Miao-Yunzai 的 config/config/redis.yaml */
+  /** 将 AlemonJS 的 Redis 配置同步到对应 Yunzai 的 config/config/redis.yaml */
   private syncRedisConfig(): void {
     try {
       const values = getConfigValue() ?? {};
       const rc = values.redis;
 
       if (!rc || typeof rc !== 'object') {
-        logger.info('[Yunzai] 未找到 AlemonJS redis 配置，Miao-Yunzai 将使用自身默认配置');
+        logger.info(`[Yunzai] 未找到 AlemonJS redis 配置，${this.variant} 将使用自身默认配置`);
 
         return;
       }
@@ -451,17 +461,11 @@ class YunzaiManager {
       return;
     }
 
-    const pkgName = String(pkg?.name ?? '').toLowerCase();
     const pureEdition = isPureEditionPackage(pkg, yunzaiDir);
-    const isMiaoVariant =
-      pkgName === 'miao-yunzai' ||
-      pkgName === 'miao_yunzai' ||
-      typeof pkg?.imports?.['#miao'] === 'string' ||
-      typeof pkg?.imports?.['#miao.models'] === 'string' ||
-      typeof pkg?.scripts?.ksr === 'string';
     const missing: string[] = [];
 
-    if (!pureEdition && isMiaoVariant) {
+    // 这是 Miao-Yunzai 的发行版约束，TRSS-Yunzai 不依赖 miao-plugin。
+    if (!pureEdition && detectYunzaiVariant(pkg) === 'miao') {
       const miaoPluginDir = join(yunzaiDir, 'plugins', 'miao-plugin');
       const miaoPluginEntry = join(miaoPluginDir, 'components', 'index.js');
 
@@ -487,10 +491,10 @@ class YunzaiManager {
 
     this.ready = false;
 
-    // ── 启动前检查必要插件（如 Miao-Yunzai 依赖 miao-plugin） ──
+    // ── 仅 Miao-Yunzai 检查其发行版专属依赖 ──
     this.validateRequiredPlugins();
 
-    // ── 同步 AlemonJS 的 Redis 配置到 Miao-Yunzai ──
+    // ── 同步 AlemonJS 的 Redis 配置到当前发行版 ──
     this.syncRedisConfig();
 
     this.worker = fork(WORKER_PATH, [], {
@@ -735,8 +739,16 @@ class YunzaiManager {
     }
   }
 
-  /** 使用内置 yarn 安装依赖（原生支持 workspaces，插件子包依赖一并安装） */
+  /**
+   * 按发行版安装依赖。
+   * TRSS-Yunzai 的 package.json 使用 `link:` 依赖，Yarn 1 无法解析；
+   * Miao/原版 Yunzai 仍保留 Yarn 工作区兼容流程。
+   */
   private npmInstall(cwd: string): Promise<string> {
+    if (detectYunzaiVariant(readYunzaiPackage(cwd)) === 'trss') {
+      return this.pnpmInstall(cwd);
+    }
+
     return new Promise((resolve, reject) => {
       const restorePackageJson = this.patchPackageJsonForInstall(cwd);
 
@@ -747,6 +759,8 @@ class YunzaiManager {
           if (err) {
             const hint = (err as any).killed ? ' (超时)' : '';
             const detail = stderr?.trim() ? `${stderr.trim()}\n${err.message}` : err.message;
+
+            logger.error(`[Yunzai] Yarn 依赖安装失败: ${detail}`);
 
             reject(new Error(`${detail}${hint}`));
           } else {
@@ -760,6 +774,112 @@ class YunzaiManager {
         restorePackageJson();
         reject(err);
       }
+    });
+  }
+
+  private getManagedPnpmPath(): string {
+    const executable = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+
+    return join(PACKAGE_ROOT, 'runtime', 'pnpm', 'bin', executable);
+  }
+
+  /**
+   * 使用插件内置 Yarn 引导一份私有 pnpm，避免要求用户预先全局安装。
+   * 该目录不属于 Yunzai 仓库，更新/重装机器人时不会被覆盖。
+   */
+  private bootstrapManagedPnpm(): Promise<string> {
+    const pnpmPath = this.getManagedPnpmPath();
+
+    if (existsSync(pnpmPath)) {
+      return Promise.resolve(pnpmPath);
+    }
+
+    const prefix = join(PACKAGE_ROOT, 'runtime', 'pnpm');
+
+    mkdirSync(prefix, { recursive: true });
+    logger.info('[Yunzai] 未检测到 pnpm，正在通过内置 Yarn 准备私有 pnpm...');
+
+    return new Promise((resolve, reject) => {
+      try {
+        const cp = execFile(
+          process.execPath,
+          [YARN_PATH, 'global', 'add', 'pnpm@10', '--prefix', prefix],
+          { cwd: PACKAGE_ROOT, timeout: 1_800_000 },
+          (err, _stdout, stderr) => {
+            this.taskProcess = null;
+
+            if (err || !existsSync(pnpmPath)) {
+              const stderrText = stderr?.trim();
+              const detail = stderrText ? stderrText : (err?.message ?? 'pnpm 可执行文件未生成');
+
+              logger.error(`[Yunzai] 私有 pnpm 准备失败: ${detail}`);
+              reject(new Error(`无法自动准备 pnpm: ${detail}`));
+
+              return;
+            }
+
+            logger.info('[Yunzai] 私有 pnpm 已准备完成');
+            resolve(pnpmPath);
+          }
+        );
+
+        this.taskProcess = cp;
+      } catch (err: any) {
+        this.taskProcess = null;
+        logger.error(`[Yunzai] 私有 pnpm 无法启动: ${err?.message ?? String(err)}`);
+        reject(new Error(`无法自动准备 pnpm: ${err?.message ?? String(err)}`));
+      }
+    });
+  }
+
+  /** TRSS-Yunzai 使用 pnpm，保留它的 link: 依赖和原始 package.json。 */
+  private pnpmInstall(cwd: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const systemCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+      const runInstall = (command: string, retriedWithManagedPnpm = false) => {
+        try {
+          const cp = execFile(command, ['install', '--prod=false'], { cwd, timeout: 1_800_000 }, (err, stdout, stderr) => {
+            this.taskProcess = null;
+
+            if (err) {
+              if ((err as any).code === 'ENOENT' && !retriedWithManagedPnpm) {
+                void this.bootstrapManagedPnpm()
+                  .then(pnpmPath => runInstall(pnpmPath, true))
+                  .catch(reject);
+
+                return;
+              }
+
+              const hint = (err as any).killed ? ' (超时)' : '';
+              const detail = stderr?.trim() ? `${stderr.trim()}\n${err.message}` : err.message;
+
+              logger.error(`[Yunzai] TRSS pnpm 依赖安装失败: ${detail}${hint}`);
+              reject(new Error(`${detail}${hint}`));
+
+              return;
+            }
+
+            resolve(stdout);
+          });
+
+          this.taskProcess = cp;
+        } catch (err: any) {
+          this.taskProcess = null;
+
+          if (err?.code === 'ENOENT' && !retriedWithManagedPnpm) {
+            void this.bootstrapManagedPnpm()
+              .then(pnpmPath => runInstall(pnpmPath, true))
+              .catch(reject);
+
+            return;
+          }
+
+          logger.error(`[Yunzai] TRSS pnpm 无法启动: ${err?.message ?? String(err)}`);
+          reject(new Error(err?.message ?? String(err)));
+        }
+      };
+
+      runInstall(systemCommand);
     });
   }
 

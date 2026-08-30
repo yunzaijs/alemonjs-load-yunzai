@@ -5,61 +5,59 @@
     "bradlc.vscode-tailwindcss",
     "esbenp.prettier-vscode",
     "dbaeumer.vscode-eslint",
-    
+
     // React 和前端开发
     "dsznajder.es7-react-js-snippets",
     "formulahendry.auto-rename-tag",
     "christian-kohler.path-intellisense",
     "zignd.html-css-class-completion",
-    
+
     // Node.js 和后端开发
     "ms-vscode.vscode-json",
     "redhat.vscode-yaml",
     "ms-vscode.js-debug",
     "ms-vscode.js-debug-nightly",
-    
+
     // Git 和版本控制
     "eamodio.gitlens",
     "mhutchie.git-graph",
     "donjayamanne.githistory",
-    
+
     // 代码质量和格式化
     "streetsidesoftware.code-spell-checker",
     "usernamehw.errorlens",
     "aaron-bond.better-comments",
     "oderwat.indent-rainbow",
-    
+
     // 开发效率工具
     "formulahendry.code-runner",
     "ms-vscode.vscode-thunder-client",
     "humao.rest-client",
     "rangav.vscode-thunder-client",
-    
+
     // 文件管理和导航
     "alefragnani.project-manager",
     "formulahendry.auto-close-tag",
     "ms-vscode.vscode-npx",
-    
+
     // 主题和图标
     "pkief.material-icon-theme",
     "zhuangtongfa.material-theme",
-    
+
     // Markdown 支持
     "yzhang.markdown-all-in-one",
     "shd101wyy.markdown-preview-enhanced",
-    
+
     // 开发服务器和调试
     "ms-vscode.vscode-js-profile-flame",
     "ms-vscode.vscode-js-profile-table",
     "firefox-devtools.vscode-firefox-debug",
-    
+
     // Docker 支持 (如果使用 Docker)
     "ms-azuretools.vscode-docker",
-    
+
     // 中文支持
     "ms-ceintl.vscode-language-pack-zh-hans"
   ],
-  "unwantedRecommendations": [
-    "ms-vscode.vscode-typescript"
-  ]
+  "unwantedRecommendations": ["ms-vscode.vscode-typescript"]
 }
