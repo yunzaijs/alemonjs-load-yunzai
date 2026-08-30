@@ -2,8 +2,6 @@
 
 这是一个桥接层，通过进程隔离 + IPC 协议，将所有 Yunzai-Bot 版本的生态无缝桥接到现代 AlemonJS 框架的加载插件。默认安装 [TRSS-Yunzai](https://github.com/TimeRainStarSky/Yunzai)，同时兼容 Miao-Yunzai。
 
-本地安装目录固定为 `Yunzai`，不支持修改目录名。启动时会自动将旧版本的 `Miao-Yunzai` 目录迁移为 `Yunzai`（不会覆盖已存在的 `Yunzai`）。随后读取 `Yunzai/package.json` 的 `name` 自动识别发行版和机器人身份：TRSS-Yunzai 的 name 是 `trss-yunzai`，Gitee 原版 Yunzai-Bot 的 name 是 `yunzai`，两者都不要求安装 `miao-plugin`；Miao-Yunzai 保留原有的 `miao-plugin` 依赖检查和相关增强能力。
-
 ## 特性
 
 - 所有 Yunzai-Bot 版本的生态都能无缝桥接
