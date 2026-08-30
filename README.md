@@ -54,7 +54,7 @@ master_key:
 
 `#yz安装` -> `#yz安装依赖` -> `#yz安装插件<别名>` -> `#yz启动/#yz重启`
 
-`#yz安装` 只克隆机器人源码；`#yz安装依赖` 才执行当前发行版所需的 Yarn 或 pnpm 安装。两者可分别重试：依赖安装失败不会再删除已克隆的机器人目录。
+`#yz安装` 只克隆机器人源码；`#yz安装依赖` 会在当前 Yunzai 根目录安装或修复 Yunzai 及 `plugins/**` 下所有插件的依赖。两者可分别重试：依赖安装失败不会再删除已克隆的机器人目录。
 
 TRSS-Yunzai 需要 pnpm 来处理其 `link:` 依赖。若系统未安装 pnpm，加载器会使用内置 Yarn 在插件运行目录中自动准备一份私有 pnpm，再继续安装依赖，无需全局安装。
 
@@ -79,9 +79,10 @@ alemonjs-load-yunzai:
   # 自定义插件（会与内置插件列表合并，别名不区分大小写）
   plugins:
     my:
-      dirName: my-plugin
       repoUrl: https://github.com/xxx/my-plugin.git
       label: my-plugin
+      # 可选：不填时自动使用仓库名
+      # dirName: my-plugin
       # 别名
       aliases:
         - 我的插件
