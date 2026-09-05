@@ -8,6 +8,7 @@
  * 生命周期：
  *   injectGlobals → loadPlugin基类 → loadPluginsLoader → load() → 监听 IPC
  */
+import { exec, execFile } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -17,6 +18,13 @@ import { createCompatValueWrapper } from './compat';
 import { getExecutionContextForAction, runWithExecutionContext } from './execution-context';
 import { buildForwardMsgCompat, buildForwardMsgParts } from './forward';
 import type { IPCApiResponse, IPCEventMessage, IPCReplyResult, ParentToWorker, ReplyContent } from './protocol';
+
+type CommandResult = {
+  error: Error | null;
+  stdout: string;
+  stderr: string;
+  raw: { stdout: string | Buffer; stderr: string | Buffer };
+};
 
 // ━━━━━━━━━━━━━━━ IPC 通信 ━━━━━━━━━━━━━━━
 
@@ -329,11 +337,19 @@ function injectGlobals(): void {
           JSON.stringify(
             data,
             (_key, value) => {
-              if (typeof value === 'bigint' || typeof value === 'function') { return String(value); }
-              if (value instanceof Map || value instanceof Set) { return [...value]; }
-              if (value instanceof Error) { return value.stack ?? value.message; }
+              if (typeof value === 'bigint' || typeof value === 'function') {
+                return String(value);
+              }
+              if (value instanceof Map || value instanceof Set) {
+                return [...value];
+              }
+              if (value instanceof Error) {
+                return value.stack ?? value.message;
+              }
               if (value && typeof value === 'object') {
-                if (seen.has(value)) { return '[Circular]'; }
+                if (seen.has(value)) {
+                  return '[Circular]';
+                }
                 seen.add(value);
               }
 
@@ -385,6 +401,42 @@ function injectGlobals(): void {
         return false;
       }
     },
+    /**
+     * TRSS 插件用于 git/pnpm 等维护命令的执行接口。
+     * 即使命令失败也返回完整结果，供调用方读取 error.message 并给出具体提示。
+     */
+    exec: (command: string | string[], options: Record<string, unknown> = {}) => new Promise<CommandResult>(resolve => {
+        const startedAt = Date.now();
+        const displayName = botInstance.String(command);
+        const quiet = options.quiet === true;
+        const execOptions = { ...options, encoding: options.encoding ?? 'buffer' } as any;
+
+        delete execOptions.quiet;
+
+        const done = (error: Error | null, stdout: string | Buffer, stderr: string | Buffer) => {
+          const result = {
+            error,
+            stdout: String(stdout ?? '').trim(),
+            stderr: String(stderr ?? '').trim(),
+            raw: { stdout, stderr }
+          };
+
+          botInstance.makeLog(
+            quiet ? 'debug' : error ? 'error' : 'mark',
+            `${displayName} [完成${botInstance.getTimeDiff(startedAt)}]${result.stdout ? `\n${result.stdout}` : ''}${result.stderr ? `\n${result.stderr}` : ''}`,
+            'Command'
+          );
+          resolve(result);
+        };
+
+        if (Array.isArray(command)) {
+          const [file, ...args] = command;
+
+          execFile(file, args, execOptions, done);
+        } else {
+          exec(command, execOptions, done);
+        }
+      }),
 
     pickFriend: (uid: number) => makeFriendProxy(uid, ''),
     pickGroup: (gid: number) => makeGroupProxy(gid),
