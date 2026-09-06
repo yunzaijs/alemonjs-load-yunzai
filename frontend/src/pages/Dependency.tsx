@@ -51,12 +51,12 @@ export default function Dependency() {
 
   return (
     <div className='py-2 space-y-3 max-w-2xl'>
-      {isDesktopRuntime && <Feedback kind='warning'>桌面模式暂不支持安装依赖。</Feedback>}
+      {isDesktopRuntime && <Feedback kind='warning'>桌面模式暂不支持添加自定义依赖。</Feedback>}
       {!installed && !isDesktopRuntime && <Feedback kind='warning'>请先在“概览”安装 Yunzai。</Feedback>}
       {message && <Feedback kind={error ? 'error' : 'success'}>{message}</Feedback>}
       <PrimaryDiv className='rounded-2xl p-4 sm:p-5 space-y-4'>
         <div className='flex items-center justify-between'>
-          <div className='text-sm font-semibold'>安装依赖</div>
+          <div className='text-sm font-semibold'>添加自定义依赖</div>
           <TagDiv className='px-2 py-0.5 rounded-full text-[10px]'>{variant === 'trss' ? 'pnpm' : 'Yarn'}</TagDiv>
         </div>
         <label className='block'>
@@ -78,7 +78,7 @@ export default function Dependency() {
           </div>
         </div>
         <Button type='button' className='w-full rounded-xl py-2.5 text-sm font-semibold dependency-execute' onClick={execute} disabled={!packageName.trim() || loading || !installed || isDesktopRuntime}>
-          {loading ? '安装中...' : '执行'}
+          {loading ? '添加中...' : '添加依赖'}
         </Button>
       </PrimaryDiv>
     </div>

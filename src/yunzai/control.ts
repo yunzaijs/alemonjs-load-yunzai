@@ -102,7 +102,7 @@ export async function executeYunzaiActionLocal(data: PrimitiveRecord) {
     case 'install':
       await manager.install();
 
-      return { message: 'Yunzai 源码安装完成，请继续执行“安装依赖”' };
+      return { message: 'Yunzai 已安装，依赖已自动准备完成' };
     case 'uninstall':
       await manager.uninstall();
 
@@ -130,7 +130,7 @@ export async function executeYunzaiActionLocal(data: PrimitiveRecord) {
     case 'install_deps':
       await manager.installDeps();
 
-      return { message: '依赖安装完成' };
+      return { message: '依赖修复完成' };
     case 'install_dependency': {
       const dependencyType = data.dependencyType === 'devDependencies' ? 'devDependencies' : 'dependencies';
 
@@ -219,7 +219,7 @@ export async function executeYunzaiActionLocal(data: PrimitiveRecord) {
 
       const info = getPluginInfo(plugin) ?? { dirName: plugin, repoUrl: '', label: plugin };
 
-      manager.uninstallPlugin(info);
+      await manager.uninstallPlugin(info);
 
       return { message: `${info.label} 已卸载` };
     }

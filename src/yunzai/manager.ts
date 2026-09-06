@@ -225,21 +225,27 @@ class YunzaiManager {
     }
 
     this.beginTask('安装');
+    let cloned = false;
+
     try {
       logger.info(`[Yunzai] 正在克隆 ${repoUrl} ...`);
       await this.execGit(gitClone(repoUrl, yunzaiDir));
+      cloned = true;
       this.throwIfCancelled();
-      logger.info('[Yunzai] 克隆完成。请单独执行“安装依赖”后再启动');
+      await this.syncDependencies('克隆完成后');
+      logger.info('[Yunzai] 安装完成，依赖已就绪');
     } catch (err) {
       logger.error(`[Yunzai] 安装失败: ${(err as Error)?.message ?? String(err)}`);
-      // 安装失败/取消 → 清理残留目录，避免 isInstalled 死锁
-      if (existsSync(yunzaiDir)) {
+      // 仅克隆失败时清理残留目录；源码已完成克隆时保留目录，下一次启动会自动重试依赖同步。
+      if (!cloned && existsSync(yunzaiDir)) {
         try {
           rmSync(yunzaiDir, { recursive: true, force: true });
           logger.info('[Yunzai] 安装失败，已清理残留目录');
         } catch (rmErr: any) {
           logger.warn(`[Yunzai] 清理残留目录失败: ${rmErr.message}`);
         }
+      } else if (cloned) {
+        logger.warn('[Yunzai] 源码已保留；下次启动会自动重试依赖同步');
       }
       throw err;
     } finally {
@@ -266,7 +272,8 @@ class YunzaiManager {
       const out = await this.execGit(gitPull(dir));
 
       this.throwIfCancelled();
-      logger.info('[Yunzai] 更新完成');
+      await this.syncDependencies('更新完成后');
+      logger.info('[Yunzai] 更新完成，依赖已同步');
 
       return out;
     } finally {
@@ -300,12 +307,8 @@ class YunzaiManager {
       const out = await this.execGit(gitPull(dir));
 
       this.throwIfCancelled();
-      this.ensureWorkspaces();
-      this.throwIfCancelled();
-      logger.info('[Yunzai] 正在安装依赖...');
-      await this.npmInstall(getYunzaiDir());
-      this.throwIfCancelled();
-      logger.info('[Yunzai] 更新完成，依赖已重装');
+      await this.syncDependencies('更新完成后');
+      logger.info('[Yunzai] 更新完成，依赖已同步');
       if (wasRunning) {
         await this.startInternal();
         logger.info('[Yunzai] Worker 已自动重启');
@@ -319,9 +322,12 @@ class YunzaiManager {
 
   // ─── 进程控制（公开方法，带任务锁） ───
 
-  async start(): Promise<void> {
+  async start(options: { syncDependencies?: boolean } = {}): Promise<void> {
     this.beginTask('启动');
     try {
+      if (options.syncDependencies !== false && this.isInstalled) {
+        await this.syncDependencies('启动前');
+      }
       await this.startInternal();
     } finally {
       this.endTask();
@@ -343,6 +349,9 @@ class YunzaiManager {
       this.restartCount = 0;
       await this.stopInternal();
       this.throwIfCancelled();
+      if (this.isInstalled) {
+        await this.syncDependencies('重启前');
+      }
       await this.startInternal();
     } finally {
       this.endTask();
@@ -350,8 +359,7 @@ class YunzaiManager {
   }
 
   /**
-   * 兼容保留的一键安装入口；普通安装流程应依次调用 install、installDeps、start。
-   * 该方法只在调用方明确要求“一键安装并启动”时组合执行，不改变 install 的职责。
+   * 兼容保留的一键安装并启动入口。
    */
   async installAndStart(repoUrl = getDefaultRepo()): Promise<void> {
     const yunzaiDir = getYunzaiDir();
@@ -360,25 +368,26 @@ class YunzaiManager {
       throw new Error(`Yunzai 已安装在 ${yunzaiDir}`);
     }
     this.beginTask('安装');
+    let cloned = false;
+
     try {
       // 安装阶段
       try {
         logger.info(`[Yunzai] 正在克隆 ${repoUrl} ...`);
         await this.execGit(gitClone(repoUrl, yunzaiDir));
+        cloned = true;
         this.throwIfCancelled();
-        this.ensureWorkspaces();
-        this.throwIfCancelled();
-        logger.info('[Yunzai] 克隆完成，正在安装依赖...');
-        await this.npmInstall(yunzaiDir);
-        this.throwIfCancelled();
-        logger.info('[Yunzai] 依赖安装完成');
+        await this.syncDependencies('克隆完成后');
+        logger.info('[Yunzai] 依赖已就绪');
       } catch (err) {
-        // 安装失败 → 清理残留目录
-        if (existsSync(yunzaiDir)) {
+        // 仅克隆失败时清理残留目录；源码已完成克隆时保留，方便自动重试依赖同步。
+        if (!cloned && existsSync(yunzaiDir)) {
           try {
             rmSync(yunzaiDir, { recursive: true, force: true });
           } catch {}
           logger.info('[Yunzai] 安装失败，已清理残留目录');
+        } else if (cloned) {
+          logger.warn('[Yunzai] 源码已保留；下次启动会自动重试依赖同步');
         }
         throw err;
       }
@@ -540,7 +549,8 @@ class YunzaiManager {
         logger.info(`[Yunzai] 自动重启 (${this.restartCount}/${this.maxRestarts})...`);
         this.restartTimer = setTimeout(() => {
           this.restartTimer = null;
-          this.start().catch(err => {
+          // Worker 崩溃后的重试不重新执行完整包管理器，避免失败循环反复联网安装。
+          this.start({ syncDependencies: false }).catch(err => {
             logger.error(`[Yunzai] 自动重启失败: ${err.message}`);
           });
         }, 3000);
@@ -793,15 +803,51 @@ class YunzaiManager {
     });
   }
 
-  private getManagedPnpmPath(): string {
-    const executable = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+  /**
+   * 所有会加载或改变机器人代码的操作共用的依赖前置步骤。
+   * 依赖安装不再要求用户手动触发；仅保留 installDeps 作为故障修复兼容入口。
+   */
+  private async syncDependencies(reason: string): Promise<string> {
+    this.ensureWorkspaces();
+    this.throwIfCancelled();
+    logger.info(`[Yunzai] ${reason}，正在自动同步依赖...`);
+    const output = await this.npmInstall(getYunzaiDir());
 
-    return join(PACKAGE_ROOT, 'runtime', 'pnpm', 'bin', executable);
+    this.throwIfCancelled();
+
+    return output;
   }
 
   /**
-   * 使用插件内置 Yarn 引导一份私有 pnpm，避免要求用户预先全局安装。
-   * 该目录不属于 Yunzai 仓库，更新/重装机器人时不会被覆盖。
+   * 插件已完整写入磁盘后的依赖同步。
+   * 关联插件可能需要同时存在才能通过包管理器解析，因此同步失败不能撤销已安装的插件。
+   */
+  private async syncPluginDependencies(reason: string): Promise<boolean> {
+    try {
+      await this.syncDependencies(reason);
+
+      return true;
+    } catch (err) {
+      if (this.taskCancelled) {
+        throw err;
+      }
+
+      const detail = (err as Error)?.message ?? String(err);
+
+      logger.warn(`[Yunzai] ${reason}的依赖同步失败，但插件文件已保留：${detail}`);
+      logger.warn('[Yunzai] 请继续安装关联插件；完成后启动或重启会自动再次同步依赖');
+
+      return false;
+    }
+  }
+
+  private getManagedPnpmPath(): string {
+    return join(PACKAGE_ROOT, 'runtime', 'pnpm', 'node_modules', 'pnpm', 'bin', 'pnpm.cjs');
+  }
+
+  /**
+   * 使用插件内置 Yarn 在 runtime/pnpm 内安装 pnpm，避免要求用户预先全局安装。
+   * 不使用 Yarn global add：其 --prefix 在部分平台只会生成指向用户全局目录的链接。
    */
   private bootstrapManagedPnpm(): Promise<string> {
     const pnpmPath = this.getManagedPnpmPath();
@@ -811,15 +857,17 @@ class YunzaiManager {
     }
 
     const prefix = join(PACKAGE_ROOT, 'runtime', 'pnpm');
+    const packageJsonPath = join(prefix, 'package.json');
 
     mkdirSync(prefix, { recursive: true });
+    writeFileSync(packageJsonPath, `${JSON.stringify({ private: true, dependencies: { pnpm: '10' } }, null, 2)}\n`);
     logger.info('[Yunzai] 未检测到 pnpm，正在通过内置 Yarn 准备私有 pnpm...');
 
     return new Promise((resolve, reject) => {
       try {
         const cp = execFile(
           process.execPath,
-          [YARN_PATH, 'global', 'add', 'pnpm@10', '--prefix', prefix],
+          [YARN_PATH, '--cwd', prefix, 'install', '--production=true'],
           { cwd: PACKAGE_ROOT, timeout: 1_800_000 },
           (err, _stdout, stderr) => {
             this.taskProcess = null;
@@ -851,9 +899,9 @@ class YunzaiManager {
   /** TRSS-Yunzai 使用 pnpm，保留它的 link: 依赖和原始 package.json。 */
   private pnpmInstall(cwd: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const runInstall = (command: string) => {
+      const runInstall = (pnpmPath: string) => {
         try {
-          const cp = execFile(command, ['install', '--prod=false'], { cwd, timeout: 1_800_000 }, (err, stdout, stderr) => {
+          const cp = execFile(process.execPath, [pnpmPath, 'install', '--prod=false'], { cwd, timeout: 1_800_000 }, (err, stdout, stderr) => {
             this.taskProcess = null;
 
             if (err) {
@@ -901,19 +949,21 @@ class YunzaiManager {
       throw new Error(`${plugin.label} 已安装`);
     }
     this.beginTask('安装插件');
+    let pluginInstalled = false;
+
     try {
       const repoUrl = plugin.repoUrl.startsWith('https://github.com/') ? `${getGhProxy()}${plugin.repoUrl}` : plugin.repoUrl;
 
       logger.info(`[Yunzai] 正在安装 ${plugin.label}...`);
       await this.execGit(gitClone(repoUrl, pluginDir));
+      pluginInstalled = true;
       this.throwIfCancelled();
-      this.ensureWorkspaces();
-      logger.info('[Yunzai] 正在安装插件依赖...');
-      await this.npmInstall(getYunzaiDir());
-      this.throwIfCancelled();
-      logger.info(`[Yunzai] ${plugin.label} 安装完成`);
+      const dependenciesReady = await this.syncPluginDependencies(`${plugin.label} 安装后`);
+
+      logger.info(`[Yunzai] ${plugin.label} 安装完成${dependenciesReady ? '' : '，依赖将在后续操作中自动重试'}`);
     } catch (err) {
-      if (existsSync(pluginDir)) {
+      // 只有克隆阶段失败才清理；插件已完整落盘后，关联插件可以继续安装。
+      if (!pluginInstalled && existsSync(pluginDir)) {
         try {
           rmSync(pluginDir, { recursive: true, force: true });
         } catch {}
@@ -932,6 +982,7 @@ class YunzaiManager {
     const tempRoot = mkdtempSync(join(tmpdir(), 'alemonjs-yunzai-plugin-'));
     const extractDir = join(tempRoot, 'extract');
     let pluginDir = '';
+    let pluginInstalled = false;
 
     this.beginTask('安装插件压缩包');
     try {
@@ -965,12 +1016,11 @@ class YunzaiManager {
         cpSync(pluginRoot, pluginDir, { recursive: true });
       }
 
+      pluginInstalled = true;
       this.throwIfCancelled();
-      this.ensureWorkspaces();
-      logger.info(`[Yunzai] 正在为 ${dirName} 安装依赖...`);
-      await this.npmInstall(getYunzaiDir());
-      this.throwIfCancelled();
-      logger.info(`[Yunzai] ${dirName} 安装完成`);
+      const dependenciesReady = await this.syncPluginDependencies(`${dirName} 安装后`);
+
+      logger.info(`[Yunzai] ${dirName} 安装完成${dependenciesReady ? '' : '，依赖将在后续操作中自动重试'}`);
 
       return {
         dirName,
@@ -978,7 +1028,7 @@ class YunzaiManager {
         label: dirName
       };
     } catch (err) {
-      if (pluginDir && existsSync(pluginDir)) {
+      if (!pluginInstalled && pluginDir && existsSync(pluginDir)) {
         try {
           rmSync(pluginDir, { recursive: true, force: true });
         } catch {}
@@ -995,7 +1045,7 @@ class YunzaiManager {
   /**
    * 将已保存的插件压缩包解压安装到 plugins/ 目录。
    * 与仓库页压缩包解压保持一致：Yunzai 运行中拒绝操作；已存在同名目录时
-   * 通过暂存 + 备份的方式安全覆盖，任一步失败都会回滚旧目录。
+   * 通过暂存 + 备份的方式安全覆盖。文件替换失败会回滚旧目录；依赖同步失败则保留新插件。
    */
   async extractPluginArchiveFromFile(archivePath: string, options?: { dirName?: string; originalName?: string }): Promise<PluginInfo> {
     if (!this.isInstalled) {
@@ -1010,6 +1060,7 @@ class YunzaiManager {
     let targetDir = '';
     let backupDir = '';
     let movedCurrent = false;
+    let replacementCommitted = false;
 
     this.beginTask('解压安装插件');
     try {
@@ -1052,6 +1103,7 @@ class YunzaiManager {
 
       try {
         renameSync(staging, targetDir);
+        replacementCommitted = true;
       } catch (err) {
         if (movedCurrent && existsSync(backupDir)) {
           renameSync(backupDir, targetDir);
@@ -1060,13 +1112,14 @@ class YunzaiManager {
       }
 
       this.throwIfCancelled();
-      this.ensureWorkspaces();
-      logger.info(`[Yunzai] 正在为 ${dirName} 安装依赖...`);
-      await this.npmInstall(getYunzaiDir());
-      this.throwIfCancelled();
+      const dependenciesReady = await this.syncPluginDependencies(`${dirName} 解压安装后`);
 
-      rmSync(backupDir, { recursive: true, force: true });
-      logger.info(`[Yunzai] ${dirName} 解压安装完成`);
+      try {
+        rmSync(backupDir, { recursive: true, force: true });
+      } catch (err: any) {
+        logger.warn(`[Yunzai] 清理旧插件备份失败: ${err?.message ?? String(err)}`);
+      }
+      logger.info(`[Yunzai] ${dirName} 解压安装完成${dependenciesReady ? '' : '，依赖将在后续操作中自动重试'}`);
 
       return {
         dirName,
@@ -1075,7 +1128,10 @@ class YunzaiManager {
       };
     } catch (err) {
       try {
-        if (backupDir && existsSync(backupDir)) {
+        if (replacementCommitted) {
+          // 新插件已替换到正式目录；即使依赖解析失败或任务被取消，也保留它供关联插件继续安装。
+          rmSync(backupDir, { recursive: true, force: true });
+        } else if (backupDir && existsSync(backupDir)) {
           // 新目录已就位或部分就位：先移除再回滚旧目录
           rmSync(targetDir, { recursive: true, force: true });
           renameSync(backupDir, targetDir);
@@ -1117,11 +1173,9 @@ class YunzaiManager {
       const out = await this.execGit(gitPull(pluginDir));
 
       this.throwIfCancelled();
-      this.ensureWorkspaces();
-      logger.info('[Yunzai] 正在安装插件依赖...');
-      await this.npmInstall(getYunzaiDir());
-      this.throwIfCancelled();
-      logger.info(`[Yunzai] ${plugin.label} 更新完成`);
+      const dependenciesReady = await this.syncPluginDependencies(`${plugin.label} 更新后`);
+
+      logger.info(`[Yunzai] ${plugin.label} 更新完成${dependenciesReady ? '' : '，依赖将在后续操作中自动重试'}`);
 
       return out;
     } finally {
@@ -1129,8 +1183,8 @@ class YunzaiManager {
     }
   }
 
-  /** 卸载指定插件 */
-  uninstallPlugin(plugin: PluginInfo): void {
+  /** 卸载指定插件，并在后台同步剩余工作区依赖。 */
+  async uninstallPlugin(plugin: PluginInfo): Promise<void> {
     if (!this.isInstalled) {
       throw new Error('Yunzai 未安装');
     }
@@ -1144,7 +1198,9 @@ class YunzaiManager {
     try {
       logger.info(`[Yunzai] 正在卸载 ${plugin.label}...`);
       rmSync(pluginDir, { recursive: true, force: true });
-      logger.info(`[Yunzai] ${plugin.label} 已卸载`);
+      const dependenciesReady = await this.syncPluginDependencies(`${plugin.label} 卸载后`);
+
+      logger.info(`[Yunzai] ${plugin.label} 已卸载${dependenciesReady ? '' : '，依赖将在后续操作中自动重试'}`);
     } finally {
       this.endTask();
     }
@@ -1157,13 +1213,9 @@ class YunzaiManager {
     }
     this.beginTask('安装依赖');
     try {
-      this.ensureWorkspaces();
-      this.throwIfCancelled();
-      logger.info('[Yunzai] 正在安装依赖...');
-      const out = await this.npmInstall(getYunzaiDir());
+      const out = await this.syncDependencies('正在手动修复依赖');
 
-      this.throwIfCancelled();
-      logger.info('[Yunzai] 依赖安装完成');
+      logger.info('[Yunzai] 依赖修复完成');
 
       return out;
     } finally {
@@ -1232,7 +1284,7 @@ class YunzaiManager {
       return run(process.execPath, [YARN_PATH, 'add', spec, devFlag].filter(Boolean));
     }
 
-    return this.bootstrapManagedPnpm().then(pnpm => run(pnpm, ['add', spec, devFlag].filter(Boolean)));
+    return this.bootstrapManagedPnpm().then(pnpm => run(process.execPath, [pnpm, 'add', spec, devFlag].filter(Boolean)));
   }
 
   /** 安装 Puppeteer 所需的 Chrome 浏览器 */

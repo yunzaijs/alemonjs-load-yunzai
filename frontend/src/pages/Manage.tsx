@@ -173,11 +173,10 @@ export default function Manage() {
   const canRestart = state.installed && !state.busy && !loading && !isDesktopRuntime;
   const canUpdate = state.installed && !state.busy && !loading && !isDesktopRuntime;
   const canForceUpdate = state.installed && !state.busy && !loading && !isDesktopRuntime;
-  const canInstallDeps = state.installed && !state.busy && !loading && !isDesktopRuntime;
   const canUninstall = state.installed && !state.busy && !loading && !isDesktopRuntime;
   const showCardActions = state.installed && !state.busy && !loading && !isDesktopRuntime;
   const busyLabel = loading || state.busyTask || (lastAction ? `${lastAction}中...` : '处理中...');
-  const getDisabledReason = (action: 'install' | 'start' | 'stop' | 'restart' | 'update' | 'force_update' | 'install_deps' | 'uninstall') => {
+  const getDisabledReason = (action: 'install' | 'start' | 'stop' | 'restart' | 'update' | 'force_update' | 'uninstall') => {
     if (isDesktopRuntime) {
       return 'Desktop 模式仅展示状态，不提供此操作';
     }
@@ -286,14 +285,6 @@ export default function Manage() {
                   >
                     强制更新
                   </ActionButton>
-                  <ActionButton
-                    className='px-3 py-1.5 rounded-lg text-sm font-medium'
-                    disabled={!canInstallDeps}
-                    reason={!canInstallDeps ? getDisabledReason('install_deps') : undefined}
-                    onClick={() => sendAction('install_deps', '安装依赖')}
-                  >
-                    安装/修复依赖
-                  </ActionButton>
                 </>
               ) : (
                 <>
@@ -341,7 +332,7 @@ export default function Manage() {
           {/* 安装流程 */}
           <div>
             <div className='text-[12px] font-semibold opacity-60 mb-2'>首次安装流程</div>
-            <div className='grid grid-cols-4 gap-2'>
+            <div className='grid grid-cols-1 sm:grid-cols-3 gap-2'>
               {helpData.installFlow.map(s => (
                 <div key={s.step} className='rounded-lg p-2 text-center' style={{ background: 'rgba(128,128,128,.05)' }}>
                   <div className='text-base font-bold opacity-40 mb-1'>{s.step}</div>
@@ -350,7 +341,7 @@ export default function Manage() {
                 </div>
               ))}
             </div>
-            <div className='text-[10px] opacity-30 mt-1.5 text-center'>步骤②可重复执行安装多个插件</div>
+            <div className='text-[10px] opacity-30 mt-1.5 text-center'>步骤②可按需重复执行安装多个插件</div>
           </div>
 
           {/* 进程控制 + 工具指令 */}

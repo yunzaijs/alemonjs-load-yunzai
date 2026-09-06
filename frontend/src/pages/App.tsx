@@ -143,7 +143,7 @@ export default function AppLayout() {
             path: '/data'
           },
           {
-            label: '🧩 依赖',
+            label: '🧩 自定义包',
             activeKey: 'dependency',
             path: '/dependency'
           }
@@ -212,7 +212,7 @@ export default function AppLayout() {
               数据
             </Pill>
             <Pill active={activeKey === 'dependency'} onClick={() => go('/dependency')}>
-              依赖
+              自定义包
             </Pill>
             <Pill
               active={isConfig}

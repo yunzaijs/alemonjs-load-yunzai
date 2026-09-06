@@ -6,10 +6,9 @@ import HTML from './HTML.js';
 // ─── 数据 ───
 
 const INSTALL_FLOW = [
-  { step: '①', label: '安装Yunzai', cmd: '#yz安装', desc: '克隆 Yunzai 仓库' },
-  { step: '②', label: '安装依赖', cmd: '#yz安装依赖', desc: '安装当前发行版依赖' },
-  { step: '③', label: '安装插件', cmd: '#yz安装插件<别名>', desc: '按需安装插件' },
-  { step: '④', label: '启动', cmd: '#yz启动', desc: '启动 Worker 进程' }
+  { step: '①', label: '安装Yunzai', cmd: '#yz安装', desc: '自动准备运行依赖' },
+  { step: '②', label: '安装插件', cmd: '#yz安装插件<别名>', desc: '按需安装插件及依赖' },
+  { step: '③', label: '启动', cmd: '#yz启动', desc: '启动前自动校验依赖' }
 ];
 
 type ColorKey = 'green' | 'blue' | 'orange' | 'red';
@@ -24,7 +23,6 @@ const COLOR_CLASSES: Record<ColorKey, { text: string; bg: string; border: string
 const CONTROLS: { cmd: string; desc: string; color: ColorKey }[] = [
   { cmd: '#yz安装', desc: '安装 Yunzai 框架', color: 'green' },
   { cmd: '#yz安装插件', desc: '安装指定插件', color: 'green' },
-  { cmd: '#yz安装依赖', desc: '重新安装所有依赖', color: 'blue' },
   { cmd: '#yz安装浏览器', desc: '安装Chrome', color: 'blue' },
   { cmd: '#yz启动', desc: '启动 Worker', color: 'green' },
   { cmd: '#yz停止', desc: '停止 Worker', color: 'orange' },

@@ -508,20 +508,18 @@ export async function getStatusData() {
     onlineCatalog,
     help: {
       installFlow: [
-        { step: '①', label: '安装Yunzai', cmd: '#yz安装', desc: '克隆 Yunzai 仓库' },
-        { step: '②', label: '安装依赖', cmd: '#yz安装依赖', desc: '安装当前发行版依赖' },
+        { step: '①', label: '安装Yunzai', cmd: '#yz安装', desc: '自动准备运行依赖' },
         {
-          step: '③',
+          step: '②',
           label: '安装插件',
           cmd: isMiao ? '#yz安装插件miao' : '#yz安装插件<别名或仓库地址>',
-          desc: isMiao ? '按需安装游戏插件' : '按需安装 Yunzai 插件'
+          desc: isMiao ? '按需安装游戏插件及依赖' : '按需安装 Yunzai 插件及依赖'
         },
-        { step: '④', label: '启动', cmd: '#yz启动', desc: '启动 Worker 进程' }
+        { step: '③', label: '启动', cmd: '#yz启动', desc: '启动前自动校验依赖' }
       ],
       controls: [
         { cmd: '#yz安装', desc: '安装 Yunzai 框架', color: 'green' },
         { cmd: '#yz安装插件', desc: '安装指定插件', color: 'green' },
-        { cmd: '#yz安装依赖', desc: '重新安装所有依赖', color: 'blue' },
         { cmd: '#yz启动', desc: '启动 Worker', color: 'green' },
         { cmd: '#yz停止', desc: '停止 Worker', color: 'orange' },
         { cmd: '#yz重启', desc: '停止后重新启动', color: 'blue' },
