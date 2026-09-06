@@ -851,21 +851,12 @@ class YunzaiManager {
   /** TRSS-Yunzai 使用 pnpm，保留它的 link: 依赖和原始 package.json。 */
   private pnpmInstall(cwd: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const systemCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
-      const runInstall = (command: string, retriedWithManagedPnpm = false) => {
+      const runInstall = (command: string) => {
         try {
           const cp = execFile(command, ['install', '--prod=false'], { cwd, timeout: 1_800_000 }, (err, stdout, stderr) => {
             this.taskProcess = null;
 
             if (err) {
-              if ((err as any).code === 'ENOENT' && !retriedWithManagedPnpm) {
-                void this.bootstrapManagedPnpm()
-                  .then(pnpmPath => runInstall(pnpmPath, true))
-                  .catch(reject);
-
-                return;
-              }
-
               const hint = (err as any).killed ? ' (超时)' : '';
               const detail = stderr?.trim() ? `${stderr.trim()}\n${err.message}` : err.message;
 
@@ -881,21 +872,14 @@ class YunzaiManager {
           this.taskProcess = cp;
         } catch (err: any) {
           this.taskProcess = null;
-
-          if (err?.code === 'ENOENT' && !retriedWithManagedPnpm) {
-            void this.bootstrapManagedPnpm()
-              .then(pnpmPath => runInstall(pnpmPath, true))
-              .catch(reject);
-
-            return;
-          }
-
           logger.error(`[Yunzai] TRSS pnpm 无法启动: ${err?.message ?? String(err)}`);
           reject(new Error(err?.message ?? String(err)));
         }
       };
 
-      runInstall(systemCommand);
+      // 不调用系统 pnpm/Corepack：它会向上读取 AlemonJS 宿主的 packageManager
+      // 字段（yarn），从而拒绝在 TRSS 项目内执行 pnpm。
+      void this.bootstrapManagedPnpm().then(runInstall).catch(reject);
     });
   }
 
@@ -1223,19 +1207,11 @@ class YunzaiManager {
   }
 
   private execPackageAdd(cwd: string, spec: string, devFlag: string, isTrss: boolean): Promise<string> {
-    const run = (command: string, args: string[], retried = false): Promise<string> => new Promise((resolve, reject) => {
+    const run = (command: string, args: string[]): Promise<string> => new Promise((resolve, reject) => {
         try {
           const cp = execFile(command, args, { cwd, timeout: 1_800_000 }, (err, stdout, stderr) => {
             this.taskProcess = null;
             if (err) {
-              if (isTrss && (err as any).code === 'ENOENT' && !retried) {
-                void this.bootstrapManagedPnpm()
-                  .then(pnpm => run(pnpm, ['add', spec, devFlag].filter(Boolean), true))
-                  .then(resolve)
-                  .catch(reject);
-
-                return;
-              }
               const detail = stderr?.trim() ? `${stderr.trim()}\n${err.message}` : err.message;
 
               reject(new Error(detail));
@@ -1252,9 +1228,11 @@ class YunzaiManager {
         }
       });
 
-    return isTrss
-      ? run(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['add', spec, devFlag].filter(Boolean))
-      : run(process.execPath, [YARN_PATH, 'add', spec, devFlag].filter(Boolean));
+    if (!isTrss) {
+      return run(process.execPath, [YARN_PATH, 'add', spec, devFlag].filter(Boolean));
+    }
+
+    return this.bootstrapManagedPnpm().then(pnpm => run(pnpm, ['add', spec, devFlag].filter(Boolean)));
   }
 
   /** 安装 Puppeteer 所需的 Chrome 浏览器 */
