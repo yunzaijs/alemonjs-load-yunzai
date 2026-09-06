@@ -905,7 +905,7 @@ class YunzaiManager {
             process.execPath,
             // 管理面板的依赖同步不是 CI 构建。显式关闭 frozen lockfile，避免宿主
             // 进程继承 CI=true 时 pnpm 因锁文件与当前插件状态不一致而直接退出。
-            [pnpmPath, '--reporter=append-only', 'install', '--prod=false', '--no-frozen-lockfile'],
+            [pnpmPath, '--reporter=append-only', 'install', '--prod=false', '--no-frozen-lockfile', '--config.confirmModulesPurge=false'],
             { cwd, timeout: 1_800_000 },
             (err, stdout, stderr) => {
               this.taskProcess = null;
