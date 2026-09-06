@@ -141,6 +141,7 @@
   "scripts": {
     "app": "node index.js",
     "build": "lvy build",
+    "bundle": "yarn intall && yarn build && yarn --cwd frontend install  &&yarn --cwd frontend build",
     "dev": "lvy app.ts --serverPort 17187",
     "dev-fe": "yarn --cwd frontend dev",
     "format": "prettier --write .",
