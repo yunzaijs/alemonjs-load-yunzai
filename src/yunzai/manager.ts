@@ -901,21 +901,31 @@ class YunzaiManager {
     return new Promise((resolve, reject) => {
       const runInstall = (pnpmPath: string) => {
         try {
-          const cp = execFile(process.execPath, [pnpmPath, 'install', '--prod=false'], { cwd, timeout: 1_800_000 }, (err, stdout, stderr) => {
-            this.taskProcess = null;
+          const cp = execFile(
+            process.execPath,
+            // 管理面板的依赖同步不是 CI 构建。显式关闭 frozen lockfile，避免宿主
+            // 进程继承 CI=true 时 pnpm 因锁文件与当前插件状态不一致而直接退出。
+            [pnpmPath, '--reporter=append-only', 'install', '--prod=false', '--no-frozen-lockfile'],
+            { cwd, timeout: 1_800_000 },
+            (err, stdout, stderr) => {
+              this.taskProcess = null;
 
-            if (err) {
-              const hint = (err as any).killed ? ' (超时)' : '';
-              const detail = stderr?.trim() ? `${stderr.trim()}\n${err.message}` : err.message;
+              if (err) {
+                const hint = (err as any).killed ? ' (超时)' : '';
+                // pnpm 在部分 Windows/CI 组合中将错误详情写入 stdout。此前只回传
+                // stderr，会让前端只看到 “Command failed: node ... pnpm.cjs”。
+                const output = [stderr?.trim(), stdout?.trim()].filter(Boolean).join('\n');
+                const detail = output ? `${output}\n${err.message}` : err.message;
 
-              logger.error(`[Yunzai] TRSS pnpm 依赖安装失败: ${detail}${hint}`);
-              reject(new Error(`${detail}${hint}`));
+                logger.error(`[Yunzai] TRSS pnpm 依赖安装失败: ${detail}${hint}`);
+                reject(new Error(`${detail}${hint}`));
 
-              return;
+                return;
+              }
+
+              resolve(stdout);
             }
-
-            resolve(stdout);
-          });
+          );
 
           this.taskProcess = cp;
         } catch (err: any) {
