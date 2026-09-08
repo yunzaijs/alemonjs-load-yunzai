@@ -534,10 +534,20 @@ function appendButtonToFormat(format: InstanceType<typeof Format>, value: any, p
 }
 
 function appendContentsToFormat(format: InstanceType<typeof Format>, contents: ReplyContent[], platform?: string): void {
+  // QQ OpenAPI 将携带键盘的消息按 Markdown（msg_type: 2）发送。若正文仍以
+  // Text 写入，SDK 会得到 `msg_type: 2 + keyboard` 但没有 `markdown.content`，
+  // 随即被平台以 40034011（无效 markdown content）拒绝。普通文本本身是合法
+  // Markdown，因此在同一条回复包含按钮时改写为 MarkdownOriginal。
+  const textAsMarkdown = platform === 'qq-bot' && contents.some(content => content.type === 'button');
+
   for (const c of contents) {
     switch (c.type) {
       case 'text':
-        format.addText(c.data);
+        if (textAsMarkdown) {
+          format.addMarkdownOriginal(c.data);
+        } else {
+          format.addText(c.data);
+        }
         break;
       case 'image':
         format.addImage(normalizeOneBotMediaSource(c.data));
