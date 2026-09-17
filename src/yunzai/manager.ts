@@ -315,6 +315,10 @@ class YunzaiManager {
       }
 
       return out;
+    } catch (err: any) {
+      const statusHint = this.isRunning ? '' : ' Yunzai 当前已停止，请处理错误后重新更新或启动。';
+
+      throw new Error(`Yunzai 更新失败：${err?.message ?? '未知错误'}${statusHint}`);
     } finally {
       this.endTask();
     }
@@ -343,9 +347,11 @@ class YunzaiManager {
     }
   }
 
-  async restart(): Promise<void> {
+  async restart(beforeStop?: () => Promise<void>): Promise<void> {
     this.beginTask('重启');
     try {
+      // 先持有任务锁，再确认插件请求；确认失败时不停止当前 Worker。
+      await beforeStop?.();
       this.restartCount = 0;
       await this.stopInternal();
       this.throwIfCancelled();
@@ -649,6 +655,20 @@ class YunzaiManager {
   }
 
   // ─── IPC 通信 ───
+
+  /** 等待 IPC 写入完成；用于重启前确认请求，失败必须反馈给调用方。 */
+  sendConfirmed(msg: ParentToWorker): Promise<void> {
+    const worker = this.worker;
+
+    return new Promise((resolve, reject) => {
+      if (!worker?.connected) {
+        reject(new Error('Worker IPC 未连接'));
+
+        return;
+      }
+      worker.send(msg, error => (error ? reject(error) : resolve()));
+    });
+  }
 
   send(msg: ParentToWorker): void {
     if (!this.worker || !this.isRunning) {

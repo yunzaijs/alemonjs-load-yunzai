@@ -266,9 +266,10 @@ async function trySendNativeOneBot(event: EventsEnum | undefined, contents: Repl
     const fallbackIsLossless = requests.length === 1 && canUseGenericOneBotFallback(contents);
     const forwardFallback = requests.length === 1 && activeRequest.action.includes('_forward_msg') ? getNativeForwardFallbackRequest(contents, target) : null;
 
-    // 服务端明确拒绝合并转发时，完整展开的正文仍可作为一条普通原生消息送达。
-    // 这尤其覆盖 OneBot 私聊未实现 send_private_forward_msg 的情况（锅巴登录）。
-    if ((isUnsupportedOneBotActionError(err) || err?.oneBotActionRejected === true) && forwardFallback) {
+    // 仅在服务端明确表示“该动作或参数不支持”时才展开转发。
+    // 鉴权、账号离线或权限不足等失败也会是 oneBotActionRejected，但改用普通消息
+    // 不会成功，反而会制造第二次失败日志并掩盖根因。
+    if (isUnsupportedOneBotActionError(err) && forwardFallback) {
       logger.warn(`[bridge] OneBot 拒绝 ${activeRequest.action}，转用完整展开的原生普通消息: ${describeOneBotError(err)}`);
 
       try {
@@ -616,7 +617,7 @@ const msgEvents = new Map<string, EventsEnum>();
 let apiListenerBound = false;
 
 /** 绑定 Worker API 请求监听（仅一次） */
-function bindApiRequestListener(): void {
+export function bindApiRequestListener(): void {
   if (apiListenerBound) {
     return;
   }
@@ -639,6 +640,28 @@ function bindApiRequestListener(): void {
  */
 async function handleApiRequest(req: IPCApiRequest, msgId?: string): Promise<void> {
   const { reqId, action, params } = req;
+
+  if (action === 'restartYunzai' && !req.rawOneBot) {
+    let accepted = false;
+
+    try {
+      await manager.restart(async () => {
+        await manager.sendConfirmed({ type: 'api_response', reqId, ok: true, data: { scheduled: true } });
+        accepted = true;
+      });
+    } catch (err: any) {
+      const error = err?.message ?? String(err);
+
+      logger.error(`[bridge] Yunzai 重启失败: ${error}`);
+      // 接收成功只表示已取得重启锁；新 Worker 启动失败由宿主记录，
+      // 不把旧请求的响应误发到新 Worker。
+      if (!accepted) {
+        manager.sendToWorker({ type: 'api_response', reqId, ok: false, error });
+      }
+    }
+
+    return;
+  }
 
   try {
     const result = await dispatchApi(action, params, msgId, req.rawOneBot === true);

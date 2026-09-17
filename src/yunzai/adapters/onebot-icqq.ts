@@ -302,6 +302,29 @@ export function createOneBotRuntime(deps: {
     });
   }
 
+  function normalizeMessage(result: any) {
+    if (result?.status === 'failed' || (result?.retcode !== undefined && Number(result.retcode) !== 0)) {
+      throw new Error(`getMsg 失败: ${result?.wording ?? result?.message ?? result.retcode}`);
+    }
+    const payload = result?.data ?? result;
+
+    if (!payload || typeof payload !== 'object' || payload.message_id === undefined) {
+      throw new Error('getMsg 未返回有效消息');
+    }
+    const content = payload.message ?? payload.raw_message ?? '';
+    const message = normalizeSegments(Array.isArray(content) ? content : parseCQMessage(String(content)));
+    const rawMessage = payload.raw_message ?? extractText(message);
+
+    return {
+      ...payload,
+      user_id: payload.user_id ?? payload.sender?.user_id,
+      seq: payload.seq ?? payload.message_seq ?? payload.message_id,
+      message,
+      raw_message: rawMessage,
+      toString: () => rawMessage
+    };
+  }
+
   function createOneBotGroupAdapter(groupId: number, opts?: OneBotGroupOptions) {
     return wrapCompatValue(
       {
@@ -441,6 +464,11 @@ export function createOneBotRuntime(deps: {
             })
             .catch(() => false),
         makeForwardMsg: (nodes: any[]) => buildForwardMsgCompat(nodes),
+        /**
+         * 读取指定消息。Yunzai 插件常通过 e.group.getMsg(message_id)
+         * 取得被引用消息；底层统一交给 bridge 的 OneBot get_msg 映射。
+         */
+        getMsg: (messageId: number | string) => callApi('getMsg', { message_id: messageId }).then(normalizeMessage),
         getInfo: () => callApi('getGroupInfo', { group_id: groupId })
             .then((res: any) => cacheGroupRecord(groupId, res?.data ?? {}, opts))
             .catch(() => getCachedGroupRecord(groupId, opts)),
@@ -676,6 +704,8 @@ export function createOneBotRuntime(deps: {
       getForwardMsg: (resId: string) => callApi('getForwardMsg', { id: resId })
           .then(normalizeForwardMessages)
           .catch(() => []),
+      // 由 Worker 的父进程接管实际重启，避免插件自行退出后绕过生命周期管理。
+      restart: () => callApi('restartYunzai', {}, 5_000),
       getCookies: (domain?: string) => callApi('getCookies', { domain: domain ?? '' }).catch(() => ({ cookies: '' })),
       getCsrfToken: () => callApi('getCsrfToken').catch(() => ({ token: 0 })),
       sendLike: (uid: number, times = 10) => callApi('sendLike', { user_id: uid, times }).catch(() => false),

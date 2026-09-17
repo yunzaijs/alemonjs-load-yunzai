@@ -1,4 +1,97 @@
 {
+  "author": "yunzaijs",
+  "bugs": "https://github.com/yunzaijs/alemonjs-load-yunzai/issues",
+  "dependencies": {
+    "@koa/multer": "^4.0.0",
+    "classnames": "^2.5.1",
+    "extract-zip": "^2.0.1",
+    "isomorphic-git": "^1.37.4",
+    "jsxp": "^1.4.0",
+    "koa-bodyparser": "^4.4.1",
+    "koa-router": "^14.0.0",
+    "markdown-to-jsx": "^9.7.13",
+    "md5": "^2.3.0",
+    "multer": "^2.0.2"
+  },
+  "description": "yunzai-bot",
+  "devDependencies": {
+    "@alemonjs/db": "^0.0.20",
+    "@alemonjs/onebot": "^2.1.21",
+    "@alemonjs/qq-bot": "^2.1.33",
+    "@eslint/js": "^9.18.0",
+    "@types/koa-bodyparser": "^4.3.13",
+    "@types/koa-router": "^7.4.9",
+    "alemonjs": "^2.1.96",
+    "cssnano": "^8.0.7",
+    "eslint": "^9.18.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react": "^7.37.3",
+    "globals": "^15.14.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.5",
+    "lvyjs": "0.3.0-alpha.5",
+    "pm2": "^5",
+    "prettier": "^3",
+    "sass": "^1.90.0",
+    "tailwindcss": "3",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-eslint": "^8.19.1",
+    "yaml": "^2.6.0"
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./desktop": "./lib/desktop.js",
+    "./package": "./package.json"
+  },
+  "keywords": [
+    "alemonjs"
+  ],
+  "lint-staged": {
+    "*.{js,ts,tsx}": [
+      "prettier --write",
+      "eslint --fix --max-warnings=0 --no-warn-ignored"
+    ],
+    "*.{json,md,yml,yaml,css,scss,html}": [
+      "prettier --write"
+    ]
+  },
+  "main": "./lib/index.js",
+  "name": "alemonjs-load-yunzai",
+  "packageManager": "yarn@1.22.22",
+  "files": [
+    "lib",
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yunzaijs/alemonjs-load-yunzai.git"
+  },
+  "scripts": {
+    "app": "node index.js",
+    "build": "lvy build",
+    "bundle": "yarn intall && yarn build && yarn --cwd frontend install  &&yarn --cwd frontend build",
+    "dev": "lvy app.ts --serverPort 17187",
+    "dev-fe": "yarn --cwd frontend dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint src --ext .ts,.tsx,.js --max-warnings=0",
+    "lint:fix": "eslint src --ext .ts,.tsx,.js --fix --max-warnings=0",
+    "precommit": "lint-staged",
+    "prepare": "husky",
+    "start": "npx --yes pm2 startOrRestart pm2.config.cjs",
+    "stop": "npx --yes pm2 stop pm2.config.cjs",
+    "test": "yarn test:onebot-compat",
+    "test:git": "yarn build && node --test --test-force-exit tests/git-operations.test.mjs",
+    "test:onebot-compat": "yarn build && node --test tests/onebot-compat.test.mjs",
+    "view": "lvy app.ts --jsxp"
+  },
+  "type": "module",
+  "version": "1.0.2",
   "alemonjs": {
     "config": [
       {
@@ -70,92 +163,5 @@
       },
       "root": "dist"
     }
-  },
-  "author": "yunzaijs",
-  "bugs": "https://github.com/yunzaijs/alemonjs-load-yunzai/issues",
-  "dependencies": {
-    "@koa/multer": "^4.0.0",
-    "classnames": "^2.5.1",
-    "extract-zip": "^2.0.1",
-    "isomorphic-git": "^1.37.4",
-    "jsxp": "^1.4.0",
-    "koa-bodyparser": "^4.4.1",
-    "koa-router": "^14.0.0",
-    "markdown-to-jsx": "^9.7.13",
-    "md5": "^2.3.0",
-    "multer": "^2.0.2"
-  },
-  "description": "yunzai-bot",
-  "devDependencies": {
-    "@alemonjs/db": "^0.0.20",
-    "@alemonjs/onebot": "^2.1.21",
-    "@alemonjs/qq-bot": "^2.1.33",
-    "@eslint/js": "^9.18.0",
-    "@types/koa-bodyparser": "^4.3.13",
-    "@types/koa-router": "^7.4.9",
-    "alemonjs": "^2.1.96",
-    "cssnano": "^8.0.7",
-    "eslint": "^9.18.0",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-react": "^7.37.3",
-    "globals": "^15.14.0",
-    "husky": "^9.1.7",
-    "lint-staged": "^16.1.5",
-    "lvyjs": "0.3.0-alpha.5",
-    "pm2": "^5",
-    "prettier": "^3",
-    "sass": "^1.90.0",
-    "tailwindcss": "3",
-    "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "typescript-eslint": "^8.19.1",
-    "yaml": "^2.6.0"
-  },
-  "exports": {
-    ".": "./lib/index.js",
-    "./desktop": "./lib/desktop.js",
-    "./package": "./package.json"
-  },
-  "keywords": [
-    "alemonjs"
-  ],
-  "lint-staged": {
-    "*.{js,ts,tsx}": [
-      "prettier --write",
-      "eslint --fix --max-warnings=0 --no-warn-ignored"
-    ],
-    "*.{json,md,yml,yaml,css,scss,html}": [
-      "prettier --write"
-    ]
-  },
-  "main": "./lib/index.js",
-  "name": "alemonjs-load-yunzai",
-  "packageManager": "yarn@1.22.22",
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/yunzaijs/alemonjs-load-yunzai.git"
-  },
-  "scripts": {
-    "app": "node index.js",
-    "build": "lvy build",
-    "bundle": "yarn intall && yarn build && yarn --cwd frontend install  &&yarn --cwd frontend build",
-    "dev": "lvy app.ts --serverPort 17187",
-    "dev-fe": "yarn --cwd frontend dev",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "lint": "eslint src --ext .ts,.tsx,.js --max-warnings=0",
-    "lint:fix": "eslint src --ext .ts,.tsx,.js --fix --max-warnings=0",
-    "precommit": "lint-staged",
-    "prepare": "husky",
-    "start": "npx --yes pm2 startOrRestart pm2.config.cjs",
-    "stop": "npx --yes pm2 stop pm2.config.cjs",
-    "test": "yarn test:onebot-compat",
-    "test:onebot-compat": "yarn build && node --test tests/onebot-compat.test.mjs",
-    "view": "lvy app.ts --jsxp"
-  },
-  "type": "module",
-  "version": "1.0.2"
+  }
 }

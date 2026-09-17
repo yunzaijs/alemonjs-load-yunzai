@@ -6,7 +6,7 @@ export interface ExecutionContext {
 }
 
 const executionContextStorage = new AsyncLocalStorage<ExecutionContext>();
-const BACKGROUND_SAFE_ACTIONS = new Set(['sendGroupMsg', 'sendPrivateMsg']);
+const BACKGROUND_SAFE_ACTIONS = new Set(['sendGroupMsg', 'sendPrivateMsg', 'restartYunzai']);
 
 export function runWithExecutionContext<T>(context: ExecutionContext, callback: () => T): T {
   return executionContextStorage.run(context, callback);
@@ -18,7 +18,7 @@ export function getExecutionContext(): ExecutionContext | undefined {
 
 /**
  * 后台任务不能借用最近消息的上下文执行管理/原生动作。
- * 仅跨平台普通消息发送可在无事件时安全执行。
+ * 普通消息发送和受管 Worker 重启不依赖平台事件。
  */
 export function getExecutionContextForAction(action: string): ExecutionContext | undefined {
   const context = getExecutionContext();

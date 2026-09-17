@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { manager } from '../lib/yunzai/manager.js';
 
 import { createOneBotRuntime, isOneBotPlatform } from '../lib/yunzai/adapters/onebot-icqq.js';
 import {
@@ -102,6 +103,7 @@ test('execution contexts remain isolated across concurrent plugin work', async (
     { msgId: 'event-b', platform: 'onebot' }
   ]);
   assert.equal(getExecutionContextForAction('sendGroupMsg'), undefined);
+  assert.equal(getExecutionContextForAction('restartYunzai'), undefined);
   assert.throws(() => getExecutionContextForAction('deleteMsg'), /缺少事件上下文/);
 });
 
@@ -777,6 +779,75 @@ test('group and friend adapters expose icqq-like methods', async () => {
   assert.equal(friend.remark, 'AliceRemark');
   assert.equal(fileUrl, 'https://example.com/file');
   assert.ok(apiCalls.some(call => call.action === 'getPrivateFileUrl'));
+});
+
+test('group adapter exposes getMsg for quoted-message plugins', async () => {
+  const message = {
+    message_id: 90001, group_id: 20001, raw_message: 'quoted message',
+    sender: { user_id: 10001 }, message_seq: 123,
+    message: [{ type: 'text', data: { text: 'quoted message' } }, { type: 'image', data: { file: 'image.jpg' } }]
+  };
+  const { runtime, apiCalls } = createRuntimeMock({
+    api: {
+      getMsg: { data: message }
+    }
+  });
+
+  const result = await runtime.createOneBotGroupAdapter(20001).getMsg(90001);
+
+  assert.equal(result.message_id, 90001);
+  assert.equal(result.user_id, 10001);
+  assert.equal(result.seq, 123);
+  assert.deepEqual(result.message, [{ type: 'text', text: 'quoted message' }, { type: 'image', file: 'image.jpg' }]);
+  assert.equal(result.toString(), 'quoted message');
+  assert.ok(apiCalls.some(call => call.action === 'getMsg' && call.params.message_id === 90001));
+});
+
+test('getMsg preserves API failures and parses CQ string responses', async () => {
+  for (const value of [{ status: 'failed', retcode: 100, wording: 'missing' }, () => Promise.reject(new Error('offline'))]) {
+    const { runtime } = createRuntimeMock({ api: { getMsg: value } });
+
+    await assert.rejects(runtime.createOneBotGroupAdapter(1).getMsg(2), /missing|offline/);
+  }
+  const { runtime } = createRuntimeMock({ api: { getMsg: { message_id: 2, message: 'hello[CQ:at,qq=3]' } } });
+
+  assert.deepEqual((await runtime.createOneBotGroupAdapter(1).getMsg(2)).message, [{ type: 'text', text: 'hello' }, { type: 'at', qq: '3' }]);
+});
+
+test('managed restart reserves task lock before acknowledgment and aborts if acknowledgment fails', async () => {
+  const keys = ['stopInternal', 'startInternal', 'syncDependencies', 'restartCount'];
+  const original = Object.fromEntries(keys.map(key => [key, manager[key]]));
+  const steps = [];
+
+  manager.stopInternal = async () => { steps.push('stop'); };
+  manager.startInternal = async () => { steps.push('start'); };
+  manager.syncDependencies = async () => {};
+  try {
+    await manager.restart(async () => {
+      assert.equal(manager.isBusy, true);
+      await assert.rejects(manager.restart(async () => { steps.push('unexpected ack'); }), /正在重启/);
+      steps.push('ack');
+    });
+    assert.deepEqual(steps, ['ack', 'stop', 'start']);
+    steps.length = 0;
+    await assert.rejects(manager.restart(async () => { throw new Error('IPC closed'); }), /IPC closed/);
+    assert.deepEqual(steps, []);
+    assert.equal(manager.isBusy, false);
+    await assert.rejects(manager.sendConfirmed({ type: 'shutdown' }), /IPC 未连接/);
+  } finally {
+    Object.assign(manager, original);
+  }
+});
+
+test('bot adapter requests a manager-owned restart', async () => {
+  const { runtime, apiCalls } = createRuntimeMock();
+  const bot = runtime.createOneBotBotAdapter({
+    nickname: 'Bot', tiny_id: '', avatar: '', fl: new Map(), gl: new Map(), gml: new Map(), stat: {}, uin: 123456
+  });
+
+  await bot.restart();
+
+  assert.ok(apiCalls.some(call => call.action === 'restartYunzai'));
 });
 
 test('direct Bot and entity sends propagate confirmed failures instead of pretending success', async () => {

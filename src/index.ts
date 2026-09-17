@@ -2,6 +2,7 @@ import { defineChildren, defineRouter, lazy, logger } from 'alemonjs';
 import apiRouter from './api-router';
 import { manager } from './yunzai';
 import { migrateLegacyYunzaiDir } from './path';
+import { bindApiRequestListener } from './yunzai/bridge';
 
 const responseRouter = defineRouter([
   // 帮助指令优先（更具体的正则先匹配）
@@ -40,6 +41,7 @@ export default defineChildren({
     return { responseRouter, koaRouter: apiRouter };
   },
   async onCreated() {
+    bindApiRequestListener();
     const migration = migrateLegacyYunzaiDir();
 
     if (migration.migrated) {

@@ -7,7 +7,7 @@ import { logger } from 'alemonjs';
 import type { ChildProcess } from 'node:child_process';
 import { execFile, execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 // ─── 本地 git 检测（结果缓存） ───
 
@@ -40,15 +40,53 @@ export interface GitResult {
 
 // ─── 原生 git 执行 ───
 
+/** 仅在当前命令中信任操作目录，兼容不记录所有权的 Windows 磁盘。 */
+export function repositoryGitArgs(args: string[], cwd?: string): string[] {
+  return cwd ? ['-c', `safe.directory=${resolve(cwd).replace(/\\/g, '/')}`, ...args] : args;
+}
+
+export function describeGitFailure(operation: string, cwd: string | undefined, detail: string): string {
+  let hint = '请查看机器人日志中的 Git 详情，处理后重试。';
+
+  if (/dubious ownership|safe\.directory|does not record ownership/i.test(detail)) {
+    hint =
+      'Git 无法确认仓库目录的所有权，当前命令的目录信任设置未能解决。请在机器人运行账户下将此仓库加入 safe.directory，或迁移到支持文件所有权的磁盘后重试。';
+  } else if (/would be overwritten|local changes|conflict|divergent branches/i.test(detail)) {
+    hint = '本地修改或分支冲突阻止更新。请先备份并处理本地修改，再重试；强制更新会丢弃本地修改。';
+  } else if (/not a git repository|no tracking information|origin\/HEAD|no such remote/i.test(detail)) {
+    hint = '仓库元数据或远程分支配置不完整。若通过 ZIP 安装，请先修复仓库来源并检查远程分支配置。';
+  } else if (/authentication failed|permission denied|could not read Username|repository not found/i.test(detail)) {
+    hint = '仓库地址、访问权限或凭据有误，请检查仓库配置及运行账户的访问权限。';
+  } else if (/resolve host|connect|timed out|timeout|SSL|TLS/i.test(detail)) {
+    hint = '连接仓库失败或超时，请检查网络、代理和证书配置后重试。';
+  }
+
+  return `Git 操作失败（${operation}）${cwd ? `，目录：${cwd}` : ''}。${hint}`;
+}
+
+function gitFailure(args: string[], cwd: string | undefined, err: Error, stderr?: string): Error {
+  const detail = stderr?.trim() ? stderr.trim() : err.message;
+
+  logger.error(`[Git] ${args[0]} 失败，目录：${cwd ?? '默认目录'}\n${detail}`);
+
+  return new Error(describeGitFailure(args[0], cwd, detail));
+}
+
+/** ZIP 仓库修复也复用同样的目录信任与错误反馈。 */
+export function gitExecSync(args: string[], cwd: string): void {
+  try {
+    execFileSync('git', repositoryGitArgs(args, cwd), { cwd, timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (err: any) {
+    throw gitFailure(args, cwd, err, err.stderr?.toString());
+  }
+}
+
 function nativeExec(args: string[], cwd?: string): GitResult {
   let cp!: ChildProcess;
   const promise = new Promise<string>((resolve, reject) => {
-    cp = execFile('git', args, { cwd, timeout: 1_800_000 }, (err, stdout, stderr) => {
+    cp = execFile('git', repositoryGitArgs(args, cwd), { cwd, timeout: 1_800_000 }, (err, stdout, stderr) => {
       if (err) {
-        const hint = (err as any).killed ? ' (超时)' : '';
-        const detail = stderr?.trim() ? `${stderr.trim()}\n${err.message}` : err.message;
-
-        reject(new Error(`${detail}${hint}`));
+        reject(gitFailure(args, cwd, err, stderr));
       } else {
         resolve(stdout);
       }

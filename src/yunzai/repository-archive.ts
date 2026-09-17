@@ -1,11 +1,10 @@
 import extractZip from 'extract-zip';
-import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { PACKAGE_ROOT, getYunzaiDir } from '../path';
-import { hasNativeGit } from './git';
+import { gitExecSync, hasNativeGit } from './git';
 import { manager } from './manager';
 
 export type RepositoryArchiveTarget = 'yunzai' | 'miao';
@@ -240,11 +239,11 @@ export async function repairRepositoryArchiveOrigin(targetValue: unknown, repoUr
   }
 
   if (hasNativeGit()) {
-    execFileSync('git', ['init'], { cwd: targetDir, timeout: 30_000, stdio: 'ignore' });
+    gitExecSync(['init'], targetDir);
     try {
-      execFileSync('git', ['remote', 'remove', 'origin'], { cwd: targetDir, timeout: 30_000, stdio: 'ignore' });
+      gitExecSync(['remote', 'remove', 'origin'], targetDir);
     } catch {}
-    execFileSync('git', ['remote', 'add', 'origin', repoUrl.trim()], { cwd: targetDir, timeout: 30_000, stdio: 'ignore' });
+    gitExecSync(['remote', 'add', 'origin', repoUrl.trim()], targetDir);
   } else {
     const git = await import('isomorphic-git');
 
