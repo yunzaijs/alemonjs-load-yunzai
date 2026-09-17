@@ -61,6 +61,7 @@
   "files": [
     "lib",
     "dist",
+    "runtime/yarn",
     "README.md"
   ],
   "publishConfig": {
