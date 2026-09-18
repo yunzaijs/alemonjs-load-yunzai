@@ -525,12 +525,12 @@ class YunzaiManager {
     // 转发子进程标准输出
     this.worker.stdout?.on('data', (buf: Buffer) => {
       for (const line of buf.toString().split('\n').filter(Boolean)) {
-        logger.info(`[Yunzai:out] ${line}`);
+        logger.info(`[Yunzai] [out] ${line}`);
       }
     });
     this.worker.stderr?.on('data', (buf: Buffer) => {
       for (const line of buf.toString().split('\n').filter(Boolean)) {
-        logger.warn(`[Yunzai:err] ${line}`);
+        logger.warn(`[Yunzai] [err] ${line}`);
       }
     });
 
@@ -747,7 +747,7 @@ class YunzaiManager {
         }
         break;
       case 'error':
-        logger.error(`[Yunzai:worker] ${msg.message}`);
+        logger.error(`[Yunzai] [error] [worker] ${msg.message}`);
         break;
       case 'log': {
         const fn = logger[msg.level];
