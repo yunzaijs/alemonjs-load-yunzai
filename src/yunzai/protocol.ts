@@ -163,7 +163,13 @@ export interface IPCApiRequest {
   msgId?: string;
 }
 
-export type WorkerToParent = IPCReady | IPCReply | IPCError | IPCLog | IPCDone | IPCApiRequest;
+export interface IPCPluginFault {
+  type: 'plugin_fault';
+  plugin: string;
+  message: string;
+}
+
+export type WorkerToParent = IPCReady | IPCReply | IPCError | IPCLog | IPCDone | IPCApiRequest | IPCPluginFault;
 
 // ─────────── 共享类型 ───────────
 

@@ -14,6 +14,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createOneBotRuntime, isOneBotPlatform } from './adapters/onebot-icqq';
+import { installPluginFaultBoundary } from './plugin-faults';
 import { createCompatValueWrapper } from './compat';
 import { getExecutionContextForAction, runWithExecutionContext } from './execution-context';
 import { buildForwardMsgCompat, buildForwardMsgParts } from './forward';
@@ -1943,6 +1944,11 @@ async function main(): Promise<void> {
     }
   });
 }
+
+// 必须在导入插件及其后台初始化任务之前安装。
+installPluginFaultBoundary(path.join(process.cwd(), 'plugins'), (plugin, error) => {
+  ipcSend({ type: 'plugin_fault', plugin, message: error.stack ?? error.message });
+});
 
 main().catch(err => {
   log('error', `Worker 启动失败: ${err.message}`);

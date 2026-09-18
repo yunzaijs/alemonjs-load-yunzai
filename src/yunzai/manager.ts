@@ -101,6 +101,7 @@ function resolveArchivePluginRoot(extractDir: string): { pluginRoot: string; sug
 class YunzaiManager {
   private worker: ChildProcess | null = null;
   private ready = false;
+  private pluginFaults = new Set<string>();
   private replyHandlers = new Set<ReplyHandler>();
   private doneHandlers = new Set<(done: any) => void>();
   private apiRequestHandlers = new Set<ApiRequestHandler>();
@@ -145,7 +146,7 @@ class YunzaiManager {
       return '启动中';
     }
 
-    return '运行中';
+    return this.pluginFaults.size ? `运行中（插件异常: ${[...this.pluginFaults].join(', ')}）` : '运行中';
   }
 
   /** 是否有长时间任务正在执行 */
@@ -505,6 +506,7 @@ class YunzaiManager {
     }
 
     this.ready = false;
+    this.pluginFaults.clear();
 
     this.normalizeKnownPluginDirectories();
 
@@ -725,6 +727,10 @@ class YunzaiManager {
 
   private handleMessage(msg: WorkerToParent): void {
     switch (msg.type) {
+      case 'plugin_fault':
+        this.pluginFaults.add(msg.plugin);
+        logger.error(`[Yunzai] 插件 ${msg.plugin} 异步任务失败，Worker 保持运行；该插件部分功能可能不可用:\n${msg.message}`);
+        break;
       case 'reply':
         for (const h of this.replyHandlers) {
           h(msg);
