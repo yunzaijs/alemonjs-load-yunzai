@@ -523,13 +523,15 @@ class YunzaiManager {
     });
 
     // 转发子进程标准输出
-    this.worker.stdout?.on('data', (buf: Buffer) => {
-      for (const line of buf.toString().split('\n').filter(Boolean)) {
+    this.worker.stdout?.setEncoding('utf8');
+    this.worker.stderr?.setEncoding('utf8');
+    this.worker.stdout?.on('data', (text: string) => {
+      for (const line of text.split('\n').filter(Boolean)) {
         logger.info(`[Yunzai] [out] ${line}`);
       }
     });
-    this.worker.stderr?.on('data', (buf: Buffer) => {
-      for (const line of buf.toString().split('\n').filter(Boolean)) {
+    this.worker.stderr?.on('data', (text: string) => {
+      for (const line of text.split('\n').filter(Boolean)) {
         logger.warn(`[Yunzai] [err] ${line}`);
       }
     });

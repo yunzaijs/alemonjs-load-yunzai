@@ -15,6 +15,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createOneBotRuntime, isOneBotPlatform } from './adapters/onebot-icqq';
 import { installPluginFaultBoundary } from './plugin-faults';
+import { decodeCommandError, decodeCommandOutput, installWindowsCommandDecoding } from './command-output';
 import { createCompatValueWrapper } from './compat';
 import { getExecutionContextForAction, runWithExecutionContext } from './execution-context';
 import { buildForwardMsgCompat, buildForwardMsgParts } from './forward';
@@ -415,10 +416,11 @@ function injectGlobals(): void {
         delete execOptions.quiet;
 
         const done = (error: Error | null, stdout: string | Buffer, stderr: string | Buffer) => {
+          decodeCommandError(error, stderr);
           const result = {
             error,
-            stdout: String(stdout ?? '').trim(),
-            stderr: String(stderr ?? '').trim(),
+            stdout: decodeCommandOutput(stdout ?? '').trim(),
+            stderr: decodeCommandOutput(stderr ?? '').trim(),
             raw: { stdout, stderr }
           };
 
@@ -1701,6 +1703,7 @@ function emitBotEvent(e: any): void {
 }
 
 async function main(): Promise<void> {
+  installWindowsCommandDecoding();
   const cwd = process.cwd();
 
   log('info', `Worker 启动, cwd=${cwd}`);
