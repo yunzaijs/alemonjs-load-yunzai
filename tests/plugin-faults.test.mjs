@@ -1,9 +1,9 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { identifyPluginFault } from '../lib/yunzai/plugin-faults.js';
+import {spawnSync} from 'node:child_process';
+import {resolve} from 'node:path';
+import test from 'node:test';
+import {pathToFileURL} from 'node:url';
+import {identifyPluginFault} from '../lib/yunzai/plugin-faults.js';
 
 const root = resolve('plugins');
 const pluginFile = pathToFileURL(resolve(root, 'guoba-plugin/framework/GitTools.js')).href;

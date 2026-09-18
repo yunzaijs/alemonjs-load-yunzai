@@ -133,7 +133,7 @@ const BUILTIN_PLUGINS: PluginDef[] = [
   { aliases: ['starrail', '星铁'], repoUrl: 'https://gitee.com/hewang1an/StarRail-plugin.git', label: 'StarRail-plugin' },
   { aliases: ['zzz'], repoUrl: 'https://gitee.com/bietiaop/ZZZ-Plugin.git', label: 'ZZZ-Plugin' },
   { aliases: ['图鉴'], repoUrl: 'https://cnb.cool/tar/xiaoyao-cvs-plugin.git', label: 'xiaoyao-cvs-plugin' },
-  { aliases: ['锅巴', 'guoba'], repoUrl: 'https://gitee.com/guoba-yunzai/guoba-plugin.git', label: 'guoba-plugin' },
+  { aliases: ['锅巴', 'guoba'], repoUrl: 'https://gitee.com/longhengmu/guoba-plugin-next', label: 'guoba-plugin' },
   { aliases: ['喵喵扩展', 'liangshi'], repoUrl: 'https://gitee.com/liangshi233/liangshi-calc.git', label: 'liangshi-calc' },
   {
     aliases: ['明日方舟', '方舟', 'endfield'],
