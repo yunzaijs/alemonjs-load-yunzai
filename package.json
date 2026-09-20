@@ -88,11 +88,11 @@
     "stop": "npx --yes pm2 stop pm2.config.cjs",
     "test": "yarn test:onebot-compat",
     "test:git": "lvy build && node --test --test-force-exit tests/git-operations.test.mjs",
-    "test:onebot-compat": "lvy build && node --test tests/onebot-compat.test.mjs tests/plugin-faults.test.mjs",
+    "test:onebot-compat": "lvy build && node --test tests/onebot-compat.test.mjs tests/plugin-faults.test.mjs tests/command-output.test.mjs",
     "view": "lvy app.ts --jsxp"
   },
   "type": "module",
-  "version": "1.0.30",
+  "version": "1.0.31",
   "alemonjs": {
     "config": [
       {
