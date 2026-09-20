@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import cp from 'node:child_process';
 import { promisify } from 'node:util';
-import { decodeCommandOutput, installWindowsCommandDecoding } from '../lib/yunzai/command-output.js';
+import { decodeCommandOutput, installWindowsCommandDecoding, repairWindowsCommandPath } from '../lib/yunzai/command-output.js';
 
 // GBK 字节：“不是内部或外部命令”
 const bytes = Buffer.from('b2bbcac7c4dab2bfbbf2cde2b2bfc3fcc1ee', 'hex');
@@ -37,4 +37,45 @@ test('插件 execFile 的回调、Promise、异常与二进制选项兼容', asy
   } finally {
     restore();
   }
+});
+
+test('插件同步命令同样按 GB18030 解码并保留显式二进制输出', () => {
+  const restore = installWindowsCommandDecoding('win32');
+  const script = `process.stderr.write(Buffer.from('${bytes.toString('hex')}', 'hex')); process.exit(1)`;
+
+  try {
+    assert.throws(
+      () => cp.execFileSync(process.execPath, ['-e', script], { stdio: 'pipe' }),
+      error => error.stderr === '不是内部或外部命令' && !error.message.includes('�')
+    );
+    assert.throws(
+      () => cp.execSync(`${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}`, { stdio: 'pipe' }),
+      error => error.stderr === '不是内部或外部命令' && !error.message.includes('�')
+    );
+    assert.throws(
+      () => cp.execFileSync(process.execPath, ['-e', script], { encoding: 'buffer', stdio: 'pipe' }),
+      error => Buffer.isBuffer(error.stderr)
+    );
+  } finally {
+    restore();
+  }
+});
+
+test('Windows PATH 补回系统命令目录，并仅添加实际存在的 Git 目录', () => {
+  const env = {
+    Path: 'D:\\runtime\\bin',
+    SystemRoot: 'C:\\Windows',
+    ProgramFiles: 'C:\\Program Files'
+  };
+  const available = new Set([
+    'C:\\Windows\\System32',
+    'C:\\Windows',
+    'C:\\Windows\\System32\\WindowsPowerShell\\v1.0',
+    'C:\\Program Files\\Git\\cmd'
+  ]);
+
+  const additions = repairWindowsCommandPath('win32', env, value => available.has(value));
+
+  assert.deepEqual(additions, [...available]);
+  assert.equal(env.Path, 'D:\\runtime\\bin;C:\\Windows\\System32;C:\\Windows;C:\\Windows\\System32\\WindowsPowerShell\\v1.0;C:\\Program Files\\Git\\cmd');
 });

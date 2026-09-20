@@ -15,7 +15,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createOneBotRuntime, isOneBotPlatform } from './adapters/onebot-icqq';
 import { installPluginFaultBoundary } from './plugin-faults';
-import { decodeCommandError, decodeCommandOutput, installWindowsCommandDecoding } from './command-output';
+import { decodeCommandError, decodeCommandOutput, installWindowsCommandDecoding, repairWindowsCommandPath } from './command-output';
 import { createCompatValueWrapper } from './compat';
 import { getExecutionContextForAction, runWithExecutionContext } from './execution-context';
 import { buildForwardMsgCompat, buildForwardMsgParts } from './forward';
@@ -1703,10 +1703,15 @@ function emitBotEvent(e: any): void {
 }
 
 async function main(): Promise<void> {
+  const repairedWindowsPath = repairWindowsCommandPath();
+
   installWindowsCommandDecoding();
   const cwd = process.cwd();
 
   log('info', `Worker 启动, cwd=${cwd}`);
+  if (repairedWindowsPath.length > 0) {
+    log('info', `已补全 Windows PATH: ${repairedWindowsPath.join(';')}`);
+  }
 
   // 1. 注入全局变量
   injectGlobals();

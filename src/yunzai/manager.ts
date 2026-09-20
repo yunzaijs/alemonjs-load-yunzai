@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PluginInfo } from '../path';
 import { getDefaultRepo, getGhProxy, getYunzaiDir, PACKAGE_ROOT, WORKER_PATH, YARN_PATH } from '../path';
+import { decodeCommandOutput, repairWindowsCommandPath } from './command-output';
 import type { GitResult } from './git';
 import { gitClone, gitFetchAll, gitPull, gitResetHard } from './git';
 import type { IPCApiRequest, IPCReply, ParentToWorker, WorkerToParent } from './protocol';
@@ -22,6 +23,46 @@ import { detectYunzaiVariant, readYunzaiPackage, type YunzaiVariant } from './va
 
 type ReplyHandler = (reply: IPCReply) => void;
 type ApiRequestHandler = (req: IPCApiRequest) => void;
+
+const repairedWindowsPath = repairWindowsCommandPath();
+
+if (repairedWindowsPath.length > 0) {
+  logger.info(`[Yunzai] 已补全 Windows PATH: ${repairedWindowsPath.join(';')}`);
+}
+
+/**
+ * Worker 自身通常输出 UTF-8，但插件以 inherit/pipe 执行 cmd 时可能直接写入 GBK。
+ * 保留 Buffer 到换行符再解码，避免多字节字符刚好被流分片截断。
+ */
+function forwardWorkerOutput(stream: NodeJS.ReadableStream | null | undefined, level: 'info' | 'warn', tag: 'out' | 'err'): void {
+  if (!stream) {
+    return;
+  }
+  let pending = Buffer.alloc(0);
+  const flush = (line: Buffer) => {
+    const text = decodeCommandOutput(line).replace(/\r$/, '');
+
+    if (text) {
+      logger[level](`[Yunzai] [${tag}] ${text}`);
+    }
+  };
+
+  stream.on('data', (chunk: Buffer | string) => {
+    pending = Buffer.concat([pending, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+    let newline = pending.indexOf(0x0a);
+
+    while (newline !== -1) {
+      flush(pending.subarray(0, newline));
+      pending = pending.subarray(newline + 1);
+      newline = pending.indexOf(0x0a);
+    }
+  });
+  stream.on('end', () => {
+    if (pending.length > 0) {
+      flush(pending);
+    }
+  });
+}
 
 /** 启动失败标记文件路径（存在 = 上次反复崩溃） */
 function getStartFailedPath(): string {
@@ -522,19 +563,9 @@ class YunzaiManager {
       env: { ...process.env, YUNZAI_DIR: getYunzaiDir() }
     });
 
-    // 转发子进程标准输出
-    this.worker.stdout?.setEncoding('utf8');
-    this.worker.stderr?.setEncoding('utf8');
-    this.worker.stdout?.on('data', (text: string) => {
-      for (const line of text.split('\n').filter(Boolean)) {
-        logger.info(`[Yunzai] [out] ${line}`);
-      }
-    });
-    this.worker.stderr?.on('data', (text: string) => {
-      for (const line of text.split('\n').filter(Boolean)) {
-        logger.warn(`[Yunzai] [err] ${line}`);
-      }
-    });
+    // 以 Buffer 采集，兼容 Worker UTF-8 日志与 Windows cmd 的 GBK 输出。
+    forwardWorkerOutput(this.worker.stdout, 'info', 'out');
+    forwardWorkerOutput(this.worker.stderr, 'warn', 'err');
 
     // IPC 消息路由
     this.worker.on('message', (msg: WorkerToParent) => {
