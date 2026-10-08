@@ -21,6 +21,7 @@ import { getExecutionContext, getExecutionContextForAction, runWithExecutionCont
 import { buildForwardMsgCompat, buildForwardMsgParts } from './forward';
 import { serializeReplyMediaFile } from './media';
 import { serializeNativeMessageMedia } from './native-media';
+import { installRendererBrowserCompat } from './renderer-compat';
 import { needsQQWebCredentials } from './web-credentials';
 import { discoverQQWebCapabilities } from './web-capabilities';
 import type { QQWebCapabilities } from './web-capabilities';
@@ -1842,6 +1843,15 @@ async function main(): Promise<void> {
     log('error', `PluginsLoader 加载失败: ${err.message}`);
     ipcSend({ type: 'error', message: `Loader 加载失败: ${err.message}` });
     process.exit(1);
+  }
+
+  // 必须在插件 import 前安装：部分插件在模块顶层保存 getRenderer() 返回值。
+  try {
+    const rendererModule = await import(pathToFileURL(path.join(cwd, 'lib', 'renderer', 'loader.js')).href);
+
+    installRendererBrowserCompat(rendererModule.default, message => log('warn', `[renderer-compat] ${message}`));
+  } catch {
+    log('warn', '渲染器浏览器兼容接口未能安装');
   }
 
   let webCapabilities: QQWebCapabilities = { domains: ['qun.qq.com'], csrf: true };
