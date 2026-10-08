@@ -1738,6 +1738,20 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // PluginsLoader 的静态依赖也可能缓存渲染器，必须在其 import 前安装。
+  try {
+    const rendererModule = await import(pathToFileURL(path.join(cwd, 'lib', 'renderer', 'loader.js')).href);
+    const rendererLoader = rendererModule.default;
+
+    installRendererBrowserCompat(rendererLoader, message => log('warn', `[renderer-compat] ${message}`));
+    if (typeof rendererLoader?.getRenderer?.()?.browserInit !== 'function') {
+      throw new Error('默认渲染器缺少 browserInit');
+    }
+    log('info', '[renderer-compat] 浏览器兼容已安装 [renderer-browser-v2]');
+  } catch (err: any) {
+    log('warn', `[renderer-compat] 浏览器兼容接口未能安装: ${err.message}`);
+  }
+
   // 3. 加载 plugin 基类 → global.plugin
   try {
     const mod = await import(pathToFileURL(path.join(cwd, 'lib', 'plugins', 'plugin.js')).href);
@@ -1843,15 +1857,6 @@ async function main(): Promise<void> {
     log('error', `PluginsLoader 加载失败: ${err.message}`);
     ipcSend({ type: 'error', message: `Loader 加载失败: ${err.message}` });
     process.exit(1);
-  }
-
-  // 必须在插件 import 前安装：部分插件在模块顶层保存 getRenderer() 返回值。
-  try {
-    const rendererModule = await import(pathToFileURL(path.join(cwd, 'lib', 'renderer', 'loader.js')).href);
-
-    installRendererBrowserCompat(rendererModule.default, message => log('warn', `[renderer-compat] ${message}`));
-  } catch {
-    log('warn', '渲染器浏览器兼容接口未能安装');
   }
 
   let webCapabilities: QQWebCapabilities = { domains: ['qun.qq.com'], csrf: true };

@@ -67,3 +67,29 @@ test('missing or failed browser backend returns false so plugins can use their f
   puppeteer.restart = () => { throw new Error('restart failed'); };
   assert.equal(await selected.restart(), false);
 });
+
+test('references captured before installation receive browserInit in place', async () => {
+  const { loader, puppeteer, browser } = fixture();
+  // 对应 PluginsLoader -> runtime -> lib/puppeteer 在模块顶层缓存引用。
+  const cachedRenderer = loader.getRenderer();
+  const cachedLoader = loader.getRenderer('missing');
+  const nativeInit = puppeteer.browserInit;
+  assert.equal(cachedRenderer.browserInit, undefined);
+  installRendererBrowserCompat(loader, assert.fail);
+  // 不再次调用 getRenderer：直接重现插件的 launch 流程。
+  if (!cachedRenderer.browser) assert.ok(await cachedRenderer.browserInit());
+  assert.equal(cachedRenderer.browser, browser);
+  assert.equal(typeof cachedLoader.browserInit, 'function');
+  assert.equal(cachedLoader.browser, browser);
+  assert.equal(puppeteer.browserInit, nativeInit);
+  assert.equal(cachedRenderer.render(), 'template');
+});
+
+test('renderer stored only as the default selection is patched eagerly', async () => {
+  const { puppeteer, browser, shotium } = fixture();
+  const loader = { renderers: new Map([['puppeteer', puppeteer]]), getRenderer() { return shotium; } };
+  const cached = loader.getRenderer();
+  installRendererBrowserCompat(loader, assert.fail);
+  assert.equal(await cached.browserInit(), browser);
+  assert.equal(cached.browser, browser);
+});

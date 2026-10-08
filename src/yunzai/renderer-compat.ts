@@ -83,4 +83,11 @@ export function installRendererBrowserCompat(loader: any, report: (message: stri
   loader.getRenderer = function (...args: any[]) {
     return patch(Reflect.apply(original, this, args));
   };
+
+  // lib/puppeteer 以及插件可能已经缓存对象引用；原地补齐，无需再次 getRenderer。
+  patch(loader);
+  for (const renderer of loader.renderers?.values?.() ?? []) {
+    patch(renderer);
+  }
+  patch(Reflect.apply(original, loader, []));
 }
