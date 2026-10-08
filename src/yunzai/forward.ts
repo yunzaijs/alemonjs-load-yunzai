@@ -1,4 +1,5 @@
 import type { ReplyContent } from './protocol';
+import { unwrapOneBotResult } from './api-result';
 
 export type NativeForwardTarget = {
   isPrivate: boolean;
@@ -340,7 +341,19 @@ export function getNativeForwardFallbackRequest(contents: ReplyContent[], target
   }
 
   const forward = contents[0];
-  const fallback = forward.fallback?.length ? forward.fallback : forward.data ? [{ type: 'text' as const, data: forward.data }] : [];
+
+  // 没有展平正文，或节点仅引用服务端消息 ID 时，摘要不能冒充完整内容。
+  if (
+    !forward.fallback?.length ||
+    forward.nodes?.some(node => {
+      const source = node?.type === 'node' ? node.data : node;
+
+      return source?.id !== undefined && source?.id !== null && source.id !== '';
+    })
+  ) {
+    return null;
+  }
+  const fallback = forward.fallback;
 
   return getNativeMessageRequest(fallback, target);
 }
@@ -560,35 +573,18 @@ export function getReplyMessageId(result: any): string | undefined {
 
 /** 将 OneBot failed 响应提升为 Error，便于按错误确定性决定是否降级。 */
 export function assertOneBotActionSucceeded(result: any): any {
-  if (Array.isArray(result)) {
-    const success = result.find(item => item?.code === 2000);
+  return unwrapOneBotResult(result);
+}
 
-    if (success) {
-      return success.data;
-    }
+function assertOneBotSendSucceeded(result: any): any {
+  const payload = assertOneBotActionSucceeded(result);
 
-    const failure = result.find(item => item && typeof item === 'object' && 'code' in item);
-
-    if (failure) {
-      const response = failure.data?.oneBotResponse;
-      const error = Object.assign(new Error(`OneBot action failed (${String(failure.code)}: ${String(failure.message ?? 'unknown error')})`), {
-        // 这是平台已返回的明确失败，不是超时或断线；可安全尝试另一路发送。
-        oneBotActionRejected: true,
-        oneBotResultCode: failure.code,
-        oneBotResponse: response
-      });
-
-      throw error;
-    }
+  // SDK 动作超时会 resolve(null)，不能给 Worker 回报发送成功，也不能重发。
+  if (payload === null || payload === undefined) {
+    throw new Error('OneBot 消息发送未返回结果，可能超时；发送状态未知');
   }
 
-  if (result?.status === 'failed' || (typeof result?.retcode === 'number' && result.retcode !== 0)) {
-    const error = Object.assign(new Error(result?.wording ?? result?.message ?? `OneBot action failed (retcode=${result?.retcode ?? 'unknown'})`), result);
-
-    throw error;
-  }
-
-  return result;
+  return payload;
 }
 
 type NativeOneBotClient = {
@@ -679,7 +675,7 @@ async function sendV12Message(client: NativeOneBotClient, request: NativeMessage
       ? { detail_type: 'group', group_id: request.params.group_id, message }
       : { detail_type: 'private', user_id: request.params.user_id, message };
 
-  return assertOneBotActionSucceeded(await client.sendV12Action('send_message', params));
+  return assertOneBotSendSucceeded(await client.sendV12Action('send_message', params));
 }
 
 /**
@@ -692,12 +688,12 @@ export async function sendNativeForward(client: NativeOneBotClient, request: Nat
   }
 
   if (request.action === 'send_group_msg' && client.sendGroupMessage) {
-    return assertOneBotActionSucceeded(await client.sendGroupMessage(request.params));
+    return assertOneBotSendSucceeded(await client.sendGroupMessage(request.params));
   }
 
   if (request.action === 'send_private_msg' && client.sendPrivateMessage) {
-    return assertOneBotActionSucceeded(await client.sendPrivateMessage(request.params));
+    return assertOneBotSendSucceeded(await client.sendPrivateMessage(request.params));
   }
 
-  return assertOneBotActionSucceeded(await client.send(request));
+  return assertOneBotSendSucceeded(await client.send(request));
 }

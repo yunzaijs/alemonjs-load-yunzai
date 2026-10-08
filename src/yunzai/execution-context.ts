@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 export interface ExecutionContext {
   msgId: string;
   platform: string;
+  botId?: string;
 }
 
 const executionContextStorage = new AsyncLocalStorage<ExecutionContext>();

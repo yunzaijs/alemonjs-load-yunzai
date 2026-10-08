@@ -1,4 +1,6 @@
 import type { IPCEventMessage, ReplyContent } from '../protocol';
+import { normalizeOneBotMessageId, requireOneBotUserId } from '../query-params';
+import { OneBotWebCredentials } from '../web-credentials';
 
 type CallApi = (action: string, params?: Record<string, any>, timeout?: number) => Promise<any>;
 type SerializeReply = (msg: any) => Promise<ReplyContent[]>;
@@ -46,12 +48,14 @@ export function createOneBotRuntime(deps: {
   safeInt: SafeInt;
   resolveMasterFlag: ResolveMasterFlag;
   buildForwardMsgCompat: BuildForwardMsgCompat;
+  currentBotId?: () => string;
 }) {
   const { callApi, serializeReply, wrapCompatValue, safeInt, resolveMasterFlag, buildForwardMsgCompat } = deps;
   const MAX_CACHED_GROUPS = 50;
   const memberCache = new Map<number, Map<number, any>>();
   const memberCacheAccess = new Map<number, number>();
   let botState: OneBotBotState | null = null;
+  const webCredentials = new OneBotWebCredentials(callApi, deps.currentBotId ?? (() => String(botState?.uin ?? '')));
 
   function touchMemberCache(groupId: number): void {
     memberCacheAccess.set(groupId, Date.now());
@@ -303,13 +307,14 @@ export function createOneBotRuntime(deps: {
   }
 
   function normalizeMessage(result: any) {
-    if (result?.status === 'failed' || (result?.retcode !== undefined && Number(result.retcode) !== 0)) {
+    if (result?.status === 'failed' || (result?.retcode !== undefined && ![0, 1].includes(Number(result.retcode)))) {
       throw new Error(`getMsg 失败: ${result?.wording ?? result?.message ?? result.retcode}`);
     }
     const payload = result?.data ?? result;
 
-    if (!payload || typeof payload !== 'object' || payload.message_id === undefined) {
-      throw new Error('getMsg 未返回有效消息');
+    if (!payload || typeof payload !== 'object' || payload.message_id === undefined || payload.message_id === null) {
+      // 引用已撤回或不在后端缓存时，没有可用消息；让插件继续使用自身兜底。
+      return null;
     }
     const content = payload.message ?? payload.raw_message ?? '';
     const message = normalizeSegments(Array.isArray(content) ? content : parseCQMessage(String(content)));
@@ -323,6 +328,17 @@ export function createOneBotRuntime(deps: {
       raw_message: rawMessage,
       toString: () => rawMessage
     };
+  }
+
+  function normalizeHistory(result: any): any[] {
+    const payload = result?.data ?? result;
+    const messages = Array.isArray(payload) ? payload : payload?.messages;
+
+    if (!Array.isArray(messages)) {
+      return [];
+    }
+
+    return messages.map(normalizeMessage).filter(Boolean);
   }
 
   function createOneBotGroupAdapter(groupId: number, opts?: OneBotGroupOptions) {
@@ -368,6 +384,7 @@ export function createOneBotRuntime(deps: {
             })
             .catch(() => memberCache.get(groupId) ?? botState?.gml?.get(groupId) ?? new Map()),
         pickMember: (uid: number) => {
+          uid = requireOneBotUserId(uid);
           const current = () => getCachedMemberRecord(groupId, uid);
           const updateAfter = (action: string, params: Record<string, any>, patch: Record<string, any> = {}, remove = false) => callApi(action, params)
               .then((result: any) => {
@@ -468,13 +485,11 @@ export function createOneBotRuntime(deps: {
          * 读取指定消息。Yunzai 插件常通过 e.group.getMsg(message_id)
          * 取得被引用消息；底层统一交给 bridge 的 OneBot get_msg 映射。
          */
-        getMsg: (messageId: number | string) => callApi('getMsg', { message_id: messageId }).then(normalizeMessage),
+        getMsg: async (messageId: number | string) => normalizeMessage(await callApi('getMsg', { message_id: normalizeOneBotMessageId(messageId) })),
         getInfo: () => callApi('getGroupInfo', { group_id: groupId })
             .then((res: any) => cacheGroupRecord(groupId, res?.data ?? {}, opts))
             .catch(() => getCachedGroupRecord(groupId, opts)),
-        getChatHistory: (seq: number, count = 1) => callApi('getChatHistory', { group_id: groupId, message_seq: seq, count })
-            .then((res: any) => res?.data?.messages ?? res?.messages ?? res ?? [])
-            .catch(() => []),
+        getChatHistory: (seq: number, count = 1) => callApi('getChatHistory', { group_id: groupId, message_seq: seq, count }).then(normalizeHistory),
         getFileUrl: (fid: string) => callApi('getGroupFileUrl', { group_id: groupId, file_id: fid })
             .then((res: any) => res?.data?.url ?? res?.url ?? '')
             .catch(() => ''),
@@ -545,6 +560,7 @@ export function createOneBotRuntime(deps: {
   }
 
   function createOneBotFriendAdapter(userId: number, userName: string) {
+    userId = requireOneBotUserId(userId);
     const currentFriend = () => normalizeFriendRecord(botState?.fl?.get(userId) ?? {});
 
     return wrapCompatValue(
@@ -570,6 +586,7 @@ export function createOneBotRuntime(deps: {
         },
         asFriend: () => createOneBotFriendAdapter(userId, userName),
         asMember: (gid: number) => createOneBotGroupAdapter(gid).pickMember(userId),
+        getMsg: async (messageId: number | string) => normalizeMessage(await callApi('getMsg', { message_id: normalizeOneBotMessageId(messageId) })),
         sendMsg: async (msg: any) => {
           const contents = await serializeReply(msg);
 
@@ -579,9 +596,7 @@ export function createOneBotRuntime(deps: {
         getAvatarUrl: (size: 0 | 40 | 100 | 140 = 0) => `https://q1.qlogo.cn/g?b=qq&s=${size || 640}&nk=${userId}`,
         thumbUp: (times = 10) => callApi('sendLike', { user_id: userId, times }).catch(() => false),
         poke: (self = false) => callApi('pokeFriend', { user_id: self ? 0 : userId }).catch(() => false),
-        getChatHistory: (time?: number, cnt = 20) => callApi('getChatHistory', { user_id: userId, message_seq: time, count: cnt })
-            .then((res: any) => res?.data?.messages ?? res?.messages ?? res ?? [])
-            .catch(() => []),
+        getChatHistory: (time?: number, cnt = 20) => callApi('getChatHistory', { user_id: userId, message_seq: time, count: cnt }).then(normalizeHistory),
         markRead: (time?: number) => callApi('mark_private_msg_as_read', { user_id: userId, time }).catch(() => {}),
         getFileUrl: (fid: string) => callApi('getPrivateFileUrl', { user_id: userId, file_id: fid })
             .then((res: any) => res?.data?.url ?? res?.url ?? '')
@@ -604,7 +619,7 @@ export function createOneBotRuntime(deps: {
         setGroupReq: (_gid: number, seq: number, yes = true, reason = '') => callApi('setGroupAddRequest', { flag: String(seq), approve: yes, reason, type: 'add' }).catch(() => false),
         setGroupInvite: (_gid: number, seq: number, yes = true) => callApi('setGroupAddRequest', { flag: String(seq), approve: yes, type: 'invite' }).catch(() => false),
         getSimpleInfo: () => callApi('getStrangerInfo', { user_id: userId })
-            .then((res: any) => res?.data ?? {})
+            .then((res: any) => res?.data ?? res ?? {})
             .catch(() => ({})),
         getAddFriendSetting: () => callApi('_get_add_friend_setting', { user_id: userId })
             .then((res: any) => res?.data ?? 0)
@@ -666,7 +681,9 @@ export function createOneBotRuntime(deps: {
             return state.fl;
           })
           .catch(() => state.fl),
-      getStrangerInfo: (uid: number) => callApi('getStrangerInfo', { user_id: uid }).catch(() => ({})),
+      getStrangerInfo: (uid: number) => callApi('getStrangerInfo', { user_id: requireOneBotUserId(uid) })
+          .then((res: any) => res?.data ?? res ?? {})
+          .catch(() => ({})),
       getLoginInfo: () => callApi('getLoginInfo')
           .then((res: any) => {
             if (res?.data) {
@@ -706,8 +723,14 @@ export function createOneBotRuntime(deps: {
           .catch(() => []),
       // 由 Worker 的父进程接管实际重启，避免插件自行退出后绕过生命周期管理。
       restart: () => callApi('restartYunzai', {}, 5_000),
-      getCookies: (domain?: string) => callApi('getCookies', { domain: domain ?? '' }).catch(() => ({ cookies: '' })),
-      getCsrfToken: () => callApi('getCsrfToken').catch(() => ({ token: 0 })),
+      get cookies() {
+        return webCredentials.cookies;
+      },
+      get bkn() {
+        return webCredentials.bkn;
+      },
+      getCookies: (domain?: string) => webCredentials.getCookies(domain),
+      getCsrfToken: () => webCredentials.getCsrfToken(),
       sendLike: (uid: number, times = 10) => callApi('sendLike', { user_id: uid, times }).catch(() => false),
       getStrangerList: () => callApi('get_stranger_list').catch(() => []),
       reloadFriendList: () => state.getFriendList(),
@@ -936,6 +959,7 @@ export function createOneBotRuntime(deps: {
   }
 
   return {
+    prepareWebCredentials: (domains?: readonly string[], csrf = true) => webCredentials.prepare(domains, csrf),
     createOneBotBotAdapter,
     createOneBotGroupAdapter,
     createOneBotFriendAdapter,

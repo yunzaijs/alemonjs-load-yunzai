@@ -10,6 +10,7 @@
 import { EventsEnum, Format, logger, Next, sendToChannel, sendToUser, useClient, useGuild, useMe, useMember, useMessage, useRequest, useUser } from 'alemonjs';
 import { getYunzaiEventConcurrency } from '../path';
 import { WorkerEventQueue } from './event-queue';
+import { createOneBotClientCompat, normalizeWorkerApiResult, toOneBotApiResponse } from './api-result';
 import type { NativeForwardTarget } from './forward';
 import {
   canUseGenericOneBotFallback,
@@ -24,6 +25,7 @@ import {
 } from './forward';
 import { manager } from './manager';
 import { OneBotIngressGuard } from './onebot-ingress';
+import { normalizeOneBotMessageId, requireOneBotUserId } from './query-params';
 import type { IPCApiRequest, IPCDone, IPCMedia, IPCReply, ReplyContent } from './protocol';
 import {
   assertMessageSendSucceeded,
@@ -82,7 +84,7 @@ function getOneBotClient(event: EventsEnum): any {
   try {
     const [client] = useClient(event, _oneBotAPI);
 
-    return client;
+    return createOneBotClientCompat(client);
   } catch {
     return null;
   }
@@ -266,13 +268,13 @@ async function trySendNativeOneBot(event: EventsEnum | undefined, contents: Repl
     const fallbackIsLossless = requests.length === 1 && canUseGenericOneBotFallback(contents);
     const forwardFallback = requests.length === 1 && activeRequest.action.includes('_forward_msg') ? getNativeForwardFallbackRequest(contents, target) : null;
 
-    // 仅在服务端明确表示“该动作或参数不支持”时才展开转发。
-    // 鉴权、账号离线或权限不足等失败也会是 oneBotActionRejected，但改用普通消息
-    // 不会成功，反而会制造第二次失败日志并掩盖根因。
-    if (isUnsupportedOneBotActionError(err) && forwardFallback) {
+    // 合并转发明确失败后保留全部内容，改发普通消息。超时、断线等结果未知时不重试。
+    if ((isUnsupportedOneBotActionError(err) || err?.oneBotActionRejected === true) && forwardFallback) {
       logger.warn(`[bridge] OneBot 拒绝 ${activeRequest.action}，转用完整展开的原生普通消息: ${describeOneBotError(err)}`);
 
       try {
+        // 告知用户展示方式改变；fallback 仍携带全部文本和图片，不只发送摘要。
+        forwardFallback.params.message.unshift({ type: 'text', data: { text: '合并转发发送失败，以下为完整内容：\n' } });
         const result = await sendNativeForward(client, forwardFallback);
 
         oneBotTrace(`forward fallback success ${summarizeNativeOneBotRequest(forwardFallback)}`);
@@ -398,12 +400,6 @@ function cleanMsgEvent(id: string): void {
   msgEvents.delete(id);
 }
 
-/** 清理 pending + msgEvents */
-function cleanAll(id: string): void {
-  cleanPending(id);
-  cleanMsgEvent(id);
-}
-
 /** 绑定 Worker done 监听（仅一次） */
 function bindDoneListener(): void {
   if (doneListenerBound) {
@@ -420,8 +416,9 @@ function bindDoneListener(): void {
     }
 
     if (!done.replied) {
-      // 无插件匹配 → 立即清理，不再等超时
-      cleanAll(done.id);
+      // accept 可以安排异步查询后直接返回，不回复并不代表事件上下文已无用。
+      // 发送句柄立即释放，精确 msgId 对应的事件仍由原有 8 分钟上限清理。
+      cleanPending(done.id);
     } else {
       // 有 reply 的情况：deal() 已返回但插件可能通过定时器继续 reply
       // （如扫码登录：deal()返回 → 等用户扫码 → 20s后继续 reply）
@@ -673,7 +670,7 @@ async function handleApiRequest(req: IPCApiRequest, msgId?: string): Promise<voi
       logger.warn(`[bridge] Worker API 返回失败 action=${action} msgId=${msgId ?? '-'}: ${failure}`);
     }
 
-    manager.sendToWorker({ type: 'api_response', reqId, ok: true, data: result });
+    manager.sendToWorker({ type: 'api_response', reqId, ok: true, data: normalizeWorkerApiResult(result) });
   } catch (err: any) {
     logger.warn(`[bridge] Worker API 调用异常 action=${action} msgId=${msgId ?? '-'}: ${err?.message ?? String(err)}`);
     manager.sendToWorker({ type: 'api_response', reqId, ok: false, error: err?.message ?? 'Unknown error' });
@@ -702,7 +699,7 @@ async function dispatchApi(action: string, params: Record<string, any>, msgId?: 
 
     const { platform: _platform, ...apiParams } = params;
 
-    return await client.send({ action, params: apiParams });
+    return toOneBotApiResponse(await client.send({ action, params: apiParams }));
   }
 
   switch (action) {
@@ -748,9 +745,10 @@ async function dispatchApi(action: string, params: Record<string, any>, msgId?: 
       if (!event) {
         throw new Error('无可用事件上下文');
       }
+      const userId = isOneBotPlatform(event.Platform) ? requireOneBotUserId(params.user_id) : params.user_id;
       const [member] = useMember(event);
 
-      return await member.info({ userId: String(params.user_id), guildId: String(params.group_id) });
+      return await member.info({ userId: String(userId), guildId: String(params.group_id) });
     }
 
     case 'setGroupKick': {
@@ -973,7 +971,7 @@ async function dispatchApi(action: string, params: Record<string, any>, msgId?: 
         throw new Error('getCookies 仅 OneBot 平台可用');
       }
 
-      return await client.getCookies();
+      return await client.send({ action: 'get_cookies', params: { domain: params.domain ?? '' } });
     }
 
     case 'getCsrfToken': {
@@ -988,7 +986,7 @@ async function dispatchApi(action: string, params: Record<string, any>, msgId?: 
         throw new Error('getCsrfToken 仅 OneBot 平台可用');
       }
 
-      return await client.getCsrfToken();
+      return await client.send({ action: 'get_csrf_token', params: {} });
     }
 
     case 'getMsg': {
@@ -1003,7 +1001,7 @@ async function dispatchApi(action: string, params: Record<string, any>, msgId?: 
         throw new Error('getMsg 仅 OneBot 平台可用');
       }
 
-      return await client.getMsg({ message_id: Number(params.message_id) });
+      return await client.send({ action: 'get_msg', params: { message_id: normalizeOneBotMessageId(params.message_id) } });
     }
 
     case 'getForwardMsg': {
@@ -1037,13 +1035,21 @@ async function dispatchApi(action: string, params: Record<string, any>, msgId?: 
       if (params.group_id) {
         return await client.send({
           action: 'get_group_msg_history',
-          params: { group_id: Number(params.group_id), message_seq: Number(params.message_seq), count: params.count ?? 1 }
+          params: {
+            group_id: Number(params.group_id),
+            ...(params.message_seq === undefined ? {} : { message_seq: normalizeOneBotMessageId(params.message_seq) }),
+            count: params.count ?? 1
+          }
         });
       }
 
       return await client.send({
         action: 'get_friend_msg_history',
-        params: { user_id: Number(params.user_id), message_seq: Number(params.message_seq), count: params.count ?? 1 }
+        params: {
+          user_id: requireOneBotUserId(params.user_id),
+          ...(params.message_seq === undefined ? {} : { message_seq: normalizeOneBotMessageId(params.message_seq) }),
+          count: params.count ?? 1
+        }
       });
     }
 

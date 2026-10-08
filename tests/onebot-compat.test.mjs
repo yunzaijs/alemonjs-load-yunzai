@@ -24,6 +24,7 @@ import { getExecutionContext, getExecutionContextForAction, runWithExecutionCont
 import { createCompatValueWrapper } from '../lib/yunzai/compat.js';
 import { WorkerEventQueue } from '../lib/yunzai/event-queue.js';
 import { OneBotIngressGuard } from '../lib/yunzai/onebot-ingress.js';
+import { normalizeOneBotMessageId, requireOneBotUserId } from '../lib/yunzai/query-params.js';
 import {
   assertMessageSendSucceeded,
   describeFormatContents,
@@ -361,6 +362,19 @@ test('rejected native forwards can send the complete fallback content as an ordi
     }
   });
   assert.equal(getNativeForwardFallbackRequest([{ ...contents[0], quoteMessageId: '888' }], { isPrivate: true, userId: '10001' }), null);
+  assert.equal(getNativeForwardFallbackRequest([{ ...contents[0], fallback: undefined }], { isPrivate: true, userId: '10001' }), null);
+  assert.equal(getNativeForwardFallbackRequest([{ ...contents[0], nodes: [{ type: 'node', data: { id: '123' } }] }], { isPrivate: true, userId: '10001' }), null);
+});
+
+test('Bot installation preserves live cookie and bkn getters required by QQ web plugins', async () => {
+  const { runtime } = createRuntimeMock({ api: { getCookies: { cookies: 'fixture_session=test;' }, getCsrfToken: { token: 12345 } } });
+  const state = { uin: 123456, fl: new Map(), gl: new Map(), gml: new Map(), stat: {} };
+
+  Object.defineProperties(state, Object.getOwnPropertyDescriptors(runtime.createOneBotBotAdapter(state)));
+  assert.equal(typeof Object.getOwnPropertyDescriptor(state, 'cookies').get, 'function');
+  await runtime.prepareWebCredentials();
+  assert.equal(state.cookies['qun.qq.com'], 'fixture_session=test;');
+  assert.equal(state.bkn, 12345);
 });
 
 test('standard native messages use the same semantic OneBot methods as generic dispatch', async () => {
@@ -812,6 +826,46 @@ test('getMsg preserves API failures and parses CQ string responses', async () =>
   const { runtime } = createRuntimeMock({ api: { getMsg: { message_id: 2, message: 'hello[CQ:at,qq=3]' } } });
 
   assert.deepEqual((await runtime.createOneBotGroupAdapter(1).getMsg(2)).message, [{ type: 'text', text: 'hello' }, { type: 'at', qq: '3' }]);
+});
+
+test('missing quoted messages allow the plugin avatar fallback', async () => {
+  for (const response of [null, undefined, {}, { data: null, retcode: 0 }, { data: {} }]) {
+    const { runtime } = createRuntimeMock({ api: { getMsg: response } });
+    const group = runtime.createOneBotGroupAdapter(20001);
+    const reply = await group.getMsg(-1202100027);
+
+    assert.equal(reply, null);
+    assert.equal(await runtime.createOneBotFriendAdapter(10001, 'friend').getMsg(-1202100027), null);
+    // 与表情包插件一致：没有引用图片时继续取目标成员头像。
+    assert.equal(reply?.message?.find(segment => segment.type === 'image')?.url ?? group.pickMember(3644832937).getAvatarUrl(),
+      'https://q1.qlogo.cn/g?b=qq&s=0&nk=3644832937');
+  }
+});
+
+test('message IDs preserve signed integers and opaque strings without NaN or rounding', async () => {
+  for (const [input, expected] of [[-123, -123], ['-123', -123], ['opaque-id', 'opaque-id'], ['9007199254740993', '9007199254740993']]) {
+    assert.equal(normalizeOneBotMessageId(input), expected);
+    const { runtime, apiCalls } = createRuntimeMock({ api: { getMsg: null } });
+
+    await runtime.createOneBotGroupAdapter(1).getMsg(input);
+    assert.equal(apiCalls[0].params.message_id, expected);
+  }
+  for (const input of [undefined, null, '', ' ', NaN, Infinity, 1.5, 9007199254740992]) {
+    assert.throws(() => normalizeOneBotMessageId(input), /消息 ID/);
+  }
+});
+
+test('invalid member IDs never reach the backend and numeric QQ strings remain compatible', async () => {
+  const { runtime, apiCalls } = createRuntimeMock();
+  const group = runtime.createOneBotGroupAdapter(1);
+
+  for (const input of ['呢', 'all', '', undefined, null, 0, -1, NaN, 1.5]) {
+    assert.throws(() => group.pickMember(input), /用户 ID/);
+    assert.throws(() => requireOneBotUserId(input), /用户 ID/);
+  }
+  assert.equal(apiCalls.length, 0);
+  await group.pickMember('3644832937').getInfo();
+  assert.equal(apiCalls[0].params.user_id, 3644832937);
 });
 
 test('managed restart reserves task lock before acknowledgment and aborts if acknowledgment fails', async () => {
@@ -1314,7 +1368,7 @@ test('buildOneBotEvent builds request event with approve and reject methods', as
   assert.ok(apiCalls.some(call => call.action === 'setFriendAddRequest' && call.params.flag === 'friend-flag-1' && call.params.approve === false));
 });
 
-test('group and friend chat history methods preserve onebot message payloads', async () => {
+test('group and friend chat history methods return normalized icqq messages', async () => {
   const historyPayload = [{ message_id: 1, message: [{ type: 'image', file: 'https://example.com/a.png' }] }];
   const { runtime, apiCalls } = createRuntimeMock({
     api: {
@@ -1337,8 +1391,13 @@ test('group and friend chat history methods preserve onebot message payloads', a
   const groupHistory = await group.getChatHistory(99, 2);
   const friendHistory = await friend.getChatHistory(88, 3);
 
-  assert.deepEqual(groupHistory, historyPayload);
-  assert.deepEqual(friendHistory, historyPayload);
+  for (const history of [groupHistory, friendHistory]) {
+    assert.equal(history.length, 1);
+    assert.equal(history[0].message_id, 1);
+    assert.equal(history[0].seq, 1);
+    assert.deepEqual(history[0].message, historyPayload[0].message);
+    assert.equal(history[0].toString(), history[0].raw_message);
+  }
   assert.ok(
     apiCalls.some(call => call.action === 'getChatHistory' && call.params.group_id === 20001 && call.params.message_seq === 99 && call.params.count === 2)
   );
@@ -1423,4 +1482,37 @@ test('worker-style Bot proxy semantics still allow Bot[uin] lookup', () => {
 
   assert.equal(123456 in botProxy, true);
   assert.equal(botProxy[123456].nickname, 'Bot');
+});
+
+test('Bot and friend profile queries expose the same unwrapped icqq profile', async () => {
+  const profile = { user_id: 10006, nickname: 'ProfileName', sex: 'unknown', age: 0 };
+  for (const response of [{ data: profile }, profile]) {
+    const { runtime, apiCalls } = createRuntimeMock({ api: { getStrangerInfo: response } });
+    const bot = runtime.createOneBotBotAdapter({
+      nickname: 'Bot', tiny_id: '', avatar: '', fl: new Map(), gl: new Map(), gml: new Map(), stat: {}, uin: 123456
+    });
+    assert.deepEqual(await bot.getStrangerInfo(10006), profile);
+    assert.deepEqual(await runtime.createOneBotFriendAdapter(10006).getSimpleInfo(), profile);
+    const count = apiCalls.length;
+    assert.throws(() => bot.getStrangerInfo('invalid'), /无效的 OneBot 用户 ID/);
+    assert.equal(apiCalls.length, count);
+  }
+});
+
+test('history accepts array and envelope variants and normalizes CQ and sender fields', async () => {
+  const messages = [{ message_id: -12, message_seq: 9, sender: { user_id: 10006 }, message: 'hi[CQ:at,qq=10007]' }, {}];
+  for (const result of [messages, { messages }, { data: messages }, { data: { messages } }]) {
+    const { runtime } = createRuntimeMock({ api: { getChatHistory: result } });
+    const history = await runtime.createOneBotFriendAdapter(10006).getChatHistory();
+    assert.equal(history.length, 1);
+    assert.equal(history[0].user_id, 10006);
+    assert.equal(history[0].seq, 9);
+    assert.deepEqual(history[0].message, [{ type: 'text', text: 'hi' }, { type: 'at', qq: '10007' }]);
+  }
+});
+
+test('history query failures remain distinguishable from an empty history', async () => {
+  const { runtime } = createRuntimeMock({ api: { getChatHistory: () => { throw new Error('connection closed'); } } });
+  await assert.rejects(runtime.createOneBotGroupAdapter(20001).getChatHistory(), /connection closed/);
+  await assert.rejects(runtime.createOneBotFriendAdapter(10006).getChatHistory(), /connection closed/);
 });

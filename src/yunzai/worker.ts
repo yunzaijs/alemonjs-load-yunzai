@@ -14,11 +14,16 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createOneBotRuntime, isOneBotPlatform } from './adapters/onebot-icqq';
-import { installPluginFaultBoundary } from './plugin-faults';
+import { installPluginFaultBoundary, protectPluginAcceptHandlers } from './plugin-faults';
 import { decodeCommandError, decodeCommandOutput, installWindowsCommandDecoding, repairWindowsCommandPath } from './command-output';
 import { createCompatValueWrapper } from './compat';
-import { getExecutionContextForAction, runWithExecutionContext } from './execution-context';
+import { getExecutionContext, getExecutionContextForAction, runWithExecutionContext } from './execution-context';
 import { buildForwardMsgCompat, buildForwardMsgParts } from './forward';
+import { serializeReplyMediaFile } from './media';
+import { serializeNativeMessageMedia } from './native-media';
+import { needsQQWebCredentials } from './web-credentials';
+import { discoverQQWebCapabilities } from './web-capabilities';
+import type { QQWebCapabilities } from './web-capabilities';
 import type { IPCApiResponse, IPCEventMessage, IPCReplyResult, ParentToWorker, ReplyContent } from './protocol';
 
 type CommandResult = {
@@ -521,7 +526,7 @@ function injectGlobals(): void {
      * OneBot 请求。这里直接复用 Worker → bridge → OneBot 的双向 IPC 链路，
      * 保留原始 API 返回结构（status/retcode/data）。
      */
-    sendApi: (actionOrRequest: string | { action?: string; params?: Record<string, any> }, params: Record<string, any> = {}) => {
+    sendApi: async (actionOrRequest: string | { action?: string; params?: Record<string, any> }, params: Record<string, any> = {}) => {
       const action =
         typeof actionOrRequest === 'object' && actionOrRequest !== null ? String(actionOrRequest.action ?? '').trim() : String(actionOrRequest ?? '').trim();
       const requestParams = typeof actionOrRequest === 'object' && actionOrRequest !== null ? (actionOrRequest.params ?? {}) : params;
@@ -530,7 +535,9 @@ function injectGlobals(): void {
         return Promise.reject(new Error('sendApi 缺少 action'));
       }
 
-      return callApi(action, requestParams, 15_000, true);
+      const prepared = /^send_(?:(?:group|private|friend)_)?(?:forward_)?msg$/.test(action) ? await serializeNativeMessageMedia(requestParams) : requestParams;
+
+      return callApi(action, prepared, 15_000, true);
     },
 
     /** 获取群列表（填充 gl） */
@@ -808,7 +815,7 @@ function injectGlobals(): void {
   // 让依赖 Bot.icqq.sendUni 的插件得到明确的能力边界，而不是缺失属性告警。
   botInstance.icqq.sendUni = botInstance.sendUni;
 
-  Object.assign(botInstance, oneBotRuntime.createOneBotBotAdapter(botInstance));
+  Object.defineProperties(botInstance, Object.getOwnPropertyDescriptors(oneBotRuntime.createOneBotBotAdapter(botInstance)));
 
   // TRSS 的多 Bot 访问习惯：Bot.bots[uin] / Bot.bots.get(uin)。当前 Worker
   // 只有一个受管 Bot，因此所有已知账号都安全地指向当前 Bot，不伪造多进程实例。
@@ -930,6 +937,7 @@ function injectGlobals(): void {
 // ━━━━━━━━━━━━━━━ 合并转发消息构建 ━━━━━━━━━━━━━━━
 
 const oneBotRuntime = createOneBotRuntime({
+  currentBotId: () => getExecutionContext()?.botId ?? String((globalThis as any).Bot?.uin ?? ''),
   callApi,
   serializeReply,
   wrapCompatValue,
@@ -1004,30 +1012,6 @@ function serializeNativeOnlySegment(msg: any): ReplyContent {
 }
 
 /**
- * Worker 与 OneBot 服务可能不在同一台机器；本地媒体路径必须在 Worker 侧读成
- * base64 后跨 IPC 发送，不能把 file:// 或绝对路径交给远端 OneBot 去猜。
- */
-async function serializeReplyMediaFile(value: unknown): Promise<string> {
-  if (Buffer.isBuffer(value)) {
-    return value.toString('base64');
-  }
-
-  const file = String(value ?? '');
-  const filePath = file.startsWith('file://') ? file.slice('file://'.length) : file;
-
-  if (!filePath.startsWith('/')) {
-    return file;
-  }
-
-  try {
-    return (await fs.promises.readFile(filePath)).toString('base64');
-  } catch {
-    // 路径可能指向 OneBot 服务自身可访问的挂载目录；保留原始来源继续发送。
-    return file;
-  }
-}
-
-/**
  * 合并转发节点不会再经过普通 ReplyContent 的图片/语音/视频序列化分支。
  * 因而要在 Worker（文件实际所在进程）内递归处理节点里的媒体，不能把 macOS
  * 本地绝对路径发给远端 OneBot 服务。字段形状仍保持 icqq，父进程会统一转换为
@@ -1047,6 +1031,9 @@ async function serializeForwardSendable(value: any): Promise<any> {
   const type = String(value.type ?? '');
   const copy: any = { ...value };
 
+  if (type === 'node') {
+    return serializeNativeMessageMedia(value);
+  }
   if (['image', 'flash', 'record', 'video'].includes(type)) {
     if (value.data && typeof value.data === 'object' && !Array.isArray(value.data)) {
       copy.data = { ...value.data };
@@ -1857,6 +1844,23 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  let webCapabilities: QQWebCapabilities = { domains: ['qun.qq.com'], csrf: true };
+
+  // 插件重新加载时刷新能力清单；不依赖具体命令名称。
+  const loadPlugins = PluginsLoader.load;
+
+  PluginsLoader.load = async function (...args: any[]) {
+    const result = await Reflect.apply(loadPlugins, this, args);
+
+    try {
+      webCapabilities = await discoverQQWebCapabilities(path.join(cwd, 'plugins'));
+    } catch {
+      log('warn', '插件网页能力扫描失败，保留已有能力清单');
+    }
+
+    return result;
+  };
+
   // 5. 加载全部插件
   try {
     await PluginsLoader.load();
@@ -1897,51 +1901,80 @@ async function main(): Promise<void> {
   // 6. 监听父进程 IPC 消息
   process.on('message', (msg: ParentToWorker) => {
     if (msg.type === 'event') {
-      void runWithExecutionContext({ msgId: msg.id, platform: msg.data.platform ?? '' }, async () => {
-        // 统计收到的消息数
-        if ((globalThis as any).Bot?.stat) {
-          (globalThis as any).Bot.stat.recv_msg_cnt++;
-        }
-
-        const e = buildEvent(msg.data, msg.id);
-        let replied = false;
-        const origReply = e.reply;
-
-        e.reply = (m: any, q = false) => {
-          replied = true;
-
-          return origReply(m, q);
-        };
-        try {
-          // 在 Bot 上发射 icqq 风格事件（供 Bot.on 监听器使用）
-          emitBotEvent(e);
-
-          // 拦截 Yunzai 内部的重启/关机/更新指令
-          const rawMsg = String(e.msg ?? '').trim();
-
-          if (BLOCKED_COMMANDS.test(rawMsg)) {
-            const hint = rawMsg.includes('更新') ? '#yz更新' : rawMsg.includes('重启') ? '#yz重启' : '#yz停止';
-
-            e.reply(`该指令已被接管，请使用 ${hint}`);
-            ipcSend({ type: 'done', id: msg.id, replied: true });
-
-            return;
+      void runWithExecutionContext(
+        { msgId: msg.id, platform: msg.data.platform ?? '', botId: String(msg.data.rawEvent?.self_id ?? msg.data.botId ?? '') },
+        async () => {
+          // 统计收到的消息数
+          if ((globalThis as any).Bot?.stat) {
+            (globalThis as any).Bot.stat.recv_msg_cnt++;
           }
-          await PluginsLoader.deal(e);
-        } catch (err: any) {
-          log('error', `deal 异常: ${err.message}`);
-          log('error', err.stack ?? '');
-          ipcSend({
-            type: 'reply',
-            id: msg.id,
-            replyId: `r_${++replyIdCounter}_${Date.now()}`,
-            contents: [{ type: 'text', data: `[Yunzai 错误] ${err.message}` }]
-          });
-          replied = true;
+
+          const e = buildEvent(msg.data, msg.id);
+          let replied = false;
+          const origReply = e.reply;
+
+          e.reply = (m: any, q = false) => {
+            replied = true;
+
+            return origReply(m, q);
+          };
+          try {
+            // 拦截 Yunzai 内部的重启/关机/更新指令
+            const rawMsg = String(e.msg ?? '').trim();
+
+            if (BLOCKED_COMMANDS.test(rawMsg)) {
+              const hint = rawMsg.includes('更新') ? '#yz更新' : rawMsg.includes('重启') ? '#yz重启' : '#yz停止';
+
+              e.reply(`该指令已被接管，请使用 ${hint}`);
+              ipcSend({ type: 'done', id: msg.id, replied: true });
+
+              return;
+            }
+            if (isOneBotPlatform(msg.data.platform)) {
+              try {
+                const requiresQQWeb = needsQQWebCredentials(rawMsg);
+
+                await oneBotRuntime.prepareWebCredentials(
+                  requiresQQWeb ? [...webCapabilities.domains, 'qun.qq.com'] : webCapabilities.domains,
+                  requiresQQWeb || webCapabilities.csrf
+                );
+              } catch {
+                // 缺少某个域名不应阻断无关插件或事件监听器。
+                // 已知网页命令仍提供明确反馈，避免继续访问未准备好的凭据。
+                if (needsQQWebCredentials(rawMsg)) {
+                  try {
+                    await oneBotRuntime.prepareWebCredentials(['qun.qq.com']);
+                  } catch {
+                    await e.reply('未能读取 QQ 网页登录凭据，请检查机器人连接及平台支持情况。群公告和今日打卡查询暂不可用。');
+                    ipcSend({ type: 'done', id: msg.id, replied: true });
+
+                    return;
+                  }
+                }
+              }
+            }
+            // 准备同步字段后才触发监听器，与插件 deal 共用同一事件上下文。
+            emitBotEvent(e);
+            // 每次处理前覆盖当前 priority，兼容插件热重载替换 class。
+            protectPluginAcceptHandlers(PluginsLoader, (plugin, error) => {
+              log('error', `[plugin:${plugin}] accept 异常: ${error.stack ?? error.message}`);
+            });
+            await PluginsLoader.deal(e);
+          } catch (err: any) {
+            log('error', `deal 异常: ${err.message}`);
+            log('error', err.stack ?? '');
+            ipcSend({
+              type: 'reply',
+              id: msg.id,
+              replyId: `r_${++replyIdCounter}_${Date.now()}`,
+              contents: [{ type: 'text', data: `[Yunzai 错误] ${err.message}` }]
+            });
+            replied = true;
+          }
+          // 通知父进程 deal 已完成
+          ipcSend({ type: 'done', id: msg.id, replied });
         }
-        // 通知父进程 deal 已完成
-        ipcSend({ type: 'done', id: msg.id, replied });
-      });
+      );
     } else if (msg.type === 'api_response') {
       handleApiResponse(msg);
     } else if (msg.type === 'reply_result') {
