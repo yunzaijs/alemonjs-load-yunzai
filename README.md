@@ -28,6 +28,14 @@
 全局变量、`Bot.icqq`、`segment`、`logger`、`redis` 和平台差异说明：
 [Yunzai 全局变量兼容说明](./docs/yunzai-global-compatibility.md)
 
+插件及命令规则的 `event` 同时兼容 `notice.group.increase` 和 `notice.group_increase`，退群、禁言等含下划线的通知类型同样适用；也可追加具体子类型，例如 `notice.group.increase.invite`。原始 `notice_type` 保留 OneBot 的下划线格式，`Bot.on('notice.group.increase', ...)` 继续使用点号事件名。
+
+## QQ Bot 图文与按钮
+
+`qq-bot` 平台会自动将图片消息段逐张单独发送，再发送其余正文，保留 Markdown 和可点击按钮。Markdown 正文中的图片链接保持原样；仅有图片和按钮时，按钮消息会补充“请选择操作”作为正文。此行为同时适用于插件回复和主动发送，无需插件单独适配。
+
+拆分消息按顺序发送；任一条失败时向插件回报失败，不自动重发已成功的消息。其他平台沿用原有发送方式。
+
 ### 安装
 
 请访问官网 https://alemonjs.com 先安装 ALemonX,
