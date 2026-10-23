@@ -41,6 +41,25 @@ function withDefinedValues(value: Record<string, any>, keys: string[]): Record<s
   return Object.fromEntries(keys.filter(key => value[key] !== undefined && value[key] !== null).map(key => [key, value[key]]));
 }
 
+function buttonRowsToText(value: unknown): string {
+  let rows = Array.isArray(value) ? value : [value];
+  if (!(rows.length > 0 && rows.every(row => Array.isArray(row)))) rows = [rows];
+  return rows
+    .map(row =>
+      (Array.isArray(row) ? row : [row])
+        .map(item => {
+          const title =
+            item && typeof item === 'object'
+              ? (item as any).title ?? (item as any).label ?? (item as any).text ?? (item as any).render_data?.label ?? (item as any).value
+              : item;
+          return title === undefined ? '' : `[${String(title)}]`;
+        })
+        .join('')
+    )
+    .filter(Boolean)
+    .join('\n');
+}
+
 /**
  * icqq 的 Sendable 与 OneBot 11 的 message 都允许字符串或消息段数组，但段对象
  * 的字段布局不同：icqq 使用外层 text/file/message，OneBot 11 使用 data.text /
@@ -57,6 +76,11 @@ export function toOneBotSegment(value: unknown): OneBotSegment {
   }
 
   const type = String(value.type ?? 'text');
+
+  if (type === 'button') {
+    return { type: 'text', data: { text: buttonRowsToText(value.data) } };
+  }
+
   const hasOneBotData = isRecord(value.data);
   const source = hasOneBotData ? value.data : withoutType(value);
 
