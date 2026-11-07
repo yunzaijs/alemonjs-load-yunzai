@@ -680,7 +680,7 @@ async function sendGenericContents(
         let index = 0;
         const converted: ReplyContent[] = flat.map(item => {
           if (item.type === 'image') {
-            return { type: 'markdown', data: `![图片](${prepared.references[index++]})` };
+            return { type: 'markdown', data: `![图片 #0 #0](${prepared.references[index++]})` };
           }
           if (item.type === 'text') {
             return { ...item, type: 'markdown' };

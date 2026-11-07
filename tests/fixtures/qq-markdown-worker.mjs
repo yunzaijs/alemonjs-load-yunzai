@@ -77,6 +77,7 @@ try {
   assert.equal(uploads, 1);
   assert.deepEqual(calls[0].format.map(item => item.type), ['MarkdownOriginal', 'MarkdownOriginal', 'MarkdownOriginal', 'BT.group']);
   assert.match(calls[0].format[1].value, /qqbot-media:\/\/image\/v1\/r-1/);
+  assert.match(calls[0].format[1].value, /^!\[图片 #0 #0\]\(qqbot-media:/, 'image carries the size annotation QQ clients require');
   assert.equal(calls[0].format[2].value, md.data);
   assert.equal((await request({ contents: [image, button] })).ok, true);
   assert.equal(uploads, 1, 'identical image bypasses upload');
