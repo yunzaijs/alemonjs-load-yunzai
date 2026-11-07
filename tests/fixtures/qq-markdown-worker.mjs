@@ -78,6 +78,10 @@ try {
   assert.deepEqual(calls[0].format.map(item => item.type), ['MarkdownOriginal', 'MarkdownOriginal', 'MarkdownOriginal', 'BT.group']);
   assert.match(calls[0].format[1].value, /qqbot-media:\/\/image\/v1\/r-1/);
   assert.match(calls[0].format[1].value, /^!\[图片 #0 #0\]\(qqbot-media:/, 'image carries the size annotation QQ clients require');
+  const callbackMsg = { type: 'button', data: '', buttonData: [[{ text: '卡片', callback: '#卡片' }, { text: '主页', link: 'https://example.com' }]] };
+  assert.equal((await request({ contents: [text, callbackMsg] })).ok, true);
+  const callbackGroup = calls[0].format.find(item => item.type === 'BT.group');
+  assert.deepEqual(callbackGroup.value[0].value.map(button => [button.options.data, button.options.type]), [['#卡片', 'call'], ['https://example.com', 'link']]);
   assert.equal(calls[0].format[2].value, md.data);
   assert.equal((await request({ contents: [image, button] })).ok, true);
   assert.equal(uploads, 1, 'identical image bypasses upload');

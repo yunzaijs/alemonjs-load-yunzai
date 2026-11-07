@@ -38,6 +38,16 @@
 
 准备失败、配额被占用或开启 `markdownToText` 时，沿用独立图片发送。素材引用明确失效时最多重建并重试一次；超时等结果不确定的发送不重试。详细策略与缓存位置见 [QQ Markdown 素材缓存](./docs/qq-markdown-materials.md)。
 
+`segment.button` 的按钮字段与 QQ 动作的对应关系：
+
+| 写法 | QQ 动作 | 点击效果 |
+| --- | --- | --- |
+| `{ text, callback: '#面板' }` | 回调（`action.type = 1`） | 直接触发互动事件，再由规则处理命令 |
+| `{ text, link: 'https://…' }` | 跳转（`action.type = 0`） | 打开网页 |
+| `{ text, data: '#绑定' }` | 指令（`action.type = 2`） | 只把文本填入输入框，需用户自行发送 |
+
+`callback` 与 `link` 是简写字段，`data` 是它们缺省时的兜底值；显式写 `type`（0/1/2 或 `call`/`link`/`command`）优先。回调按钮在群聊里点击即执行，指令按钮适合需要用户继续补参数的场景（绑定 UID、登录等）。
+
 ### 安装
 
 请访问官网 https://alemonjs.com 先安装 ALemonX,
