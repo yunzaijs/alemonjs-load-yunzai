@@ -513,8 +513,10 @@ function normalizeButtonSpecs(value: any): ButtonSpec[][] {
         }
 
         const title = String(item.title ?? item.label ?? item.text ?? item.render_data?.label ?? item.value ?? '按钮');
-        const actionData = item.data ?? item.action?.data ?? item.options?.data ?? title;
-        const actionType = item.type ?? item.action?.type;
+        const callback = item.callback ?? item.action?.callback;
+        const link = item.link ?? item.action?.link;
+        const actionData = link ?? callback ?? item.data ?? item.action?.data ?? item.options?.data ?? title;
+        const actionType = item.type ?? item.action?.type ?? (link !== undefined ? 1 : callback !== undefined ? 0 : undefined);
         const type = actionType === 1 || actionType === 'link' ? 'link' : actionType === 0 || actionType === 'call' ? 'call' : 'command';
         const options = {
           ...(item.options ?? {}),
