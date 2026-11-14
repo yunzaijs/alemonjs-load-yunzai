@@ -1309,23 +1309,42 @@ function extractRawEvent(event: any, rawE: any): any {
 /**
  * 从 AlemonJS 事件中提取 @提及的用户列表
  * 用于跨平台（无 rawEvent）时在 Worker 侧构建 at 消息段
- * 优先从 value.message（OneBot 消息段）中提取
  */
 function extractAtUsers(event: any): { userId: string; userName?: string }[] {
   const users: { userId: string; userName?: string }[] = [];
+  const seen = new Set<string>();
+
+  const push = (id: any, name: any): void => {
+    if (id === null || id === undefined) return;
+
+    const userId = String(id).trim();
+
+    if (!userId || seen.has(userId)) return;
+
+    seen.add(userId);
+    users.push({ userId, userName: name === null || name === undefined ? '' : String(name) });
+  };
 
   try {
     const v = event.value;
 
     if (v && Array.isArray(v.message)) {
       for (const seg of v.message) {
-        if (seg?.type === 'at') {
-          const qq = seg.data?.qq ?? seg.qq;
+        if (seg?.type !== 'at') continue;
 
-          if (qq !== null && qq !== undefined && qq !== 'all') {
-            users.push({ userId: String(qq), userName: seg.data?.text ?? seg.text ?? '' });
-          }
-        }
+        push(seg.data?.qq ?? seg.qq, seg.data?.text ?? seg.text);
+      }
+    }
+
+    if (Array.isArray(event.MessageMentions)) {
+      for (const m of event.MessageMentions) {
+        push(m?.UserId ?? m?.userId ?? m?.id, m?.UserName ?? m?.userName ?? m?.username);
+      }
+    }
+
+    if (v && Array.isArray(v.mentions)) {
+      for (const m of v.mentions) {
+        push(m?.id ?? m?.userId, m?.username ?? m?.userName);
       }
     }
   } catch {
@@ -1333,6 +1352,32 @@ function extractAtUsers(event: any): { userId: string; userName?: string }[] {
   }
 
   return users;
+}
+
+function toFlag(v: any): boolean {
+  return v === true || v === 1 || v === '1' || v === 'true';
+}
+
+function extractAtMeFlag(event: any): boolean {
+  if (!event) return false;
+
+  const direct = event.IsAtMe ?? event.isAtMe ?? event.AtMe ?? event.atMe;
+
+  if (direct !== null && direct !== undefined && direct !== '') return toFlag(direct);
+
+  const v = event.value;
+
+  if (v) {
+    if (v.IsAtMe !== undefined) return toFlag(v.IsAtMe);
+
+    if (Array.isArray(v.mentions)) {
+      for (const m of v.mentions) {
+        if (m && (m.bot === true || m.is_you === true)) return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 /** 将事件送入 Worker；仅由 load 层队列在获得槽位后调用。 */
@@ -1377,6 +1422,7 @@ function dispatchEventToWorker(id: string, e: EventsEnum): void {
       isMaster: e.IsMaster ?? false,
       IsMaster: e.IsMaster ?? false,
       atUsers,
+      isAtMe: extractAtMeFlag(e),
       interactionId: interactionId ? String(interactionId) : undefined,
       interactionData,
       interactionTarget,
