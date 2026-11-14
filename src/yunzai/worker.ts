@@ -1250,6 +1250,26 @@ function safeInt(v: any, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function preserveId(v: any, fallback: number | string): any {
+  if (v === null || v === undefined) return fallback;
+
+  const text = String(v).trim();
+
+  if (!text) return fallback;
+
+  if (/^-?\d+$/.test(text)) {
+    const n = Number(text);
+
+    if (Number.isSafeInteger(n)) return n;
+  }
+
+  return text;
+}
+
+function toFlag(v: any): boolean {
+  return v === true || v === 1 || v === '1' || v === 'true';
+}
+
 /**
  * 创建 e.group 代理对象
  * 通过 callApi 实现真实的群操作（踢人/禁言/撤回等）
@@ -1307,8 +1327,8 @@ function buildFallbackNonMessageEvent(
   reply: (msg: any, quote?: boolean) => any,
   eventName: string
 ) {
-  const userId = safeInt(data.userId, 10001);
-  const groupId = data.isPrivate ? 0 : safeInt(data.spaceId, 0);
+  const userId = preserveId(data.userId, 10001);
+  const groupId = data.isPrivate ? 0 : preserveId(data.spaceId, 0);
   const masterFlag = resolveMasterFlag(data);
 
   const e: any = {
@@ -1510,8 +1530,8 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
   //  利用 AlemonJS 标准化字段生成最优 icqq 兼容事件
   // ══════════════════════════════════════════
   const isGroup = !data.isPrivate;
-  const userId = safeInt(data.userId, 10001);
-  const groupId = isGroup ? safeInt(data.spaceId, 10002) : 0;
+  const userId = preserveId(data.userId, 10001);
+  const groupId = isGroup ? preserveId(data.spaceId, 10002) : 0;
 
   // 构建消息段：文本 + 跨平台 at 段 + 跨平台媒体附件
   const messageParts: any[] = [];
@@ -1522,9 +1542,11 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
   // 注入跨平台 at 段（来自 bridge 提取的 atUsers）
   if (Array.isArray(data.atUsers)) {
     for (const u of data.atUsers) {
-      const uid = safeInt(u.userId, 0);
+      const uid = preserveId(u.userId, 0);
 
-      messageParts.push({ type: 'at', qq: uid || u.userId, text: u.userName ?? '' });
+      if (!uid) continue;
+
+      messageParts.push({ type: 'at', qq: uid, text: u.userName ?? '' });
     }
   }
   messageParts.push(...mediaToSegments(data.media));
@@ -1561,7 +1583,7 @@ function buildEvent(data: IPCEventMessage['data'], msgId: string) {
     time: Math.floor(Date.now() / 1000),
     self_id: selfId,
     font: '',
-    atme: detectAtMe(messageParts, selfId),
+    atme: toFlag(data.isAtMe) || detectAtMe(messageParts, selfId),
     atall: detectAtAll(messageParts),
 
     // ── at 目标预填（dealMsg 会覆盖，此处作为兜底） ──
