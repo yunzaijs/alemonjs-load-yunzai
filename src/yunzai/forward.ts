@@ -118,7 +118,7 @@ export function toOneBotSegment(value: unknown): OneBotSegment {
 
   switch (type) {
     case 'text':
-      return { type: 'text', data: { text: String(source.text ?? '') } };
+      return { type: 'text', data: { text: String(source.text ?? (typeof source.data === 'string' ? source.data : '')) } };
     case 'at':
       return { type: 'at', data: { qq: String(source.qq ?? source.id ?? '') } };
     case 'face':
@@ -183,9 +183,9 @@ export function toOneBotSegment(value: unknown): OneBotSegment {
 }
 
 /** 将 icqq Sendable 转成 OneBot 自定义转发节点所要求的 content 字段。 */
-export function toOneBotMessage(value: unknown): string | OneBotSegment[] {
+export function toOneBotMessage(value: unknown): OneBotSegment[] {
   if (typeof value === 'string') {
-    return value;
+    return [{ type: 'text', data: { text: value } }];
   }
 
   const elements = Array.isArray(value) ? value : [value];
@@ -511,8 +511,14 @@ export function getNativeMessageRequest(contents: ReplyContent[], target: Native
 
   if (target.isPrivate) {
     const userId = getTargetId(target.userId);
+    const privateMessage = message.filter(segment => segment?.type !== 'at');
 
-    return userId ? { action: 'send_private_msg', params: { user_id: userId, message } } : null;
+    return userId
+      ? {
+          action: 'send_private_msg',
+          params: { user_id: userId, message: privateMessage.length > 0 ? privateMessage : message }
+        }
+      : null;
   }
 
   const groupId = getTargetId(target.groupId);
