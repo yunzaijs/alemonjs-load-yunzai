@@ -65,7 +65,7 @@
     "view": "lvy app.ts --jsxp"
   },
   "type": "module",
-  "version": "1.0.43",
+  "version": "1.0.44",
   "alemonjs": {
     "config": [
       {
@@ -138,5 +138,5 @@
       "root": "dist"
     }
   },
-  "gitHead": "a1b064ddf8cb73210a6bec25479d74a3995dd82c"
+  "gitHead": "ab9ab05a71d956fcafd60e2a9f1915f617838f6b"
 }
